@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -106,6 +107,15 @@ type addReactionParams struct {
 
 type filesGetParams struct {
 	fileID string
+}
+
+type filesUploadParams struct {
+	channelID      string
+	filePath       string
+	filename       string
+	title          string
+	initialComment string
+	threadTs       string
 }
 
 type usersSearchParams struct {
@@ -479,6 +489,62 @@ func (ch *ConversationsHandler) FilesGetHandler(ctx context.Context, request mcp
 		len(content),
 		encoding,
 		escapeJSON(contentStr))
+
+	return mcp.NewToolResultText(result), nil
+}
+
+func (ch *ConversationsHandler) FilesUploadHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	ch.logger.Debug("FilesUploadHandler called", zap.Any("params", request.Params))
+
+	if ready, err := ch.apiProvider.IsReady(); !ready {
+		ch.logger.Error("API provider not ready", zap.Error(err))
+		return nil, err
+	}
+
+	params, err := ch.parseParamsToolFilesUpload(request)
+	if err != nil {
+		ch.logger.Error("Failed to parse files_upload params", zap.Error(err))
+		return nil, err
+	}
+
+	fileInfo, err := os.Stat(params.filePath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot access file %s: %w", params.filePath, err)
+	}
+	if fileInfo.Size() > int64(maxFileSizeBytes) {
+		return nil, fmt.Errorf("file size %d bytes exceeds maximum allowed size of %d bytes", fileInfo.Size(), maxFileSizeBytes)
+	}
+
+	file, err := os.Open(params.filePath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot open file %s: %w", params.filePath, err)
+	}
+	defer file.Close()
+
+	channelID, err := ch.resolveChannelID(ctx, params.channelID)
+	if err != nil {
+		return nil, err
+	}
+
+	uploadParams := slack.UploadFileV2Parameters{
+		FileSize:        int(fileInfo.Size()),
+		Reader:          file,
+		Filename:        params.filename,
+		Title:           params.title,
+		InitialComment:  params.initialComment,
+		Channel:         channelID,
+		ThreadTimestamp: params.threadTs,
+	}
+
+	fileSummary, err := ch.apiProvider.Slack().UploadFileV2Context(ctx, uploadParams)
+	if err != nil {
+		ch.logger.Error("Slack UploadFileV2Context failed", zap.Error(err))
+		return nil, err
+	}
+
+	result := fmt.Sprintf(`{"file_id":"%s","title":"%s"}`,
+		fileSummary.ID,
+		escapeJSON(fileSummary.Title))
 
 	return mcp.NewToolResultText(result), nil
 }
@@ -1791,6 +1857,32 @@ func (ch *ConversationsHandler) parseParamsToolFilesGet(request mcp.CallToolRequ
 
 	return &filesGetParams{
 		fileID: fileID,
+	}, nil
+}
+
+func (ch *ConversationsHandler) parseParamsToolFilesUpload(request mcp.CallToolRequest) (*filesUploadParams, error) {
+	filePath := request.GetString("file_path", "")
+	if filePath == "" {
+		return nil, errors.New("file_path is required")
+	}
+
+	channelID := request.GetString("channel_id", "")
+	if channelID == "" {
+		return nil, errors.New("channel_id is required")
+	}
+
+	filename := request.GetString("filename", "")
+	if filename == "" {
+		filename = filepath.Base(filePath)
+	}
+
+	return &filesUploadParams{
+		channelID:      channelID,
+		filePath:       filePath,
+		filename:       filename,
+		title:          request.GetString("title", ""),
+		initialComment: request.GetString("initial_comment", ""),
+		threadTs:       request.GetString("thread_ts", ""),
 	}, nil
 }
 

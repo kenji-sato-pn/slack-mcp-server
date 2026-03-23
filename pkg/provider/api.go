@@ -563,11 +563,42 @@ func (c *MCPSlackClient) Raw() struct {
 	}
 }
 
+// loadEnvFile reads a KEY=VALUE file and sets any SLACK_MCP_* variables
+// that are not already present in the environment.
+func loadEnvFile(path string, logger *zap.Logger) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok || !strings.HasPrefix(k, "SLACK_MCP_") {
+			continue
+		}
+		if os.Getenv(k) == "" {
+			os.Setenv(k, v)
+			logger.Debug("Loaded env from file", zap.String("key", k), zap.String("file", path))
+		}
+	}
+}
+
 func New(transport string, logger *zap.Logger) *ApiProvider {
 	var (
 		authProvider auth.ValueAuth
 		err          error
 	)
+
+	// Load env files from ~/.slack-mcp/ if env vars are not set.
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		dir := home + "/.slack-mcp"
+		loadEnvFile(dir+"/tokens.env", logger)
+		loadEnvFile(dir+"/config.env", logger)
+	}
 
 	// Read all environment variables
 	xoxpToken := os.Getenv("SLACK_MCP_XOXP_TOKEN")

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -1872,9 +1873,7 @@ func (ch *ConversationsHandler) parseParamsToolFilesUpload(request mcp.CallToolR
 
 	filename := request.GetString("filename", "")
 	if filename == "" {
-		// Use basename of file_path
-		parts := strings.Split(filePath, "/")
-		filename = parts[len(parts)-1]
+		filename = filepath.Base(filePath)
 	}
 
 	return &filesUploadParams{

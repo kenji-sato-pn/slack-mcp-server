@@ -40,11 +40,8 @@ const (
 	ToolUsergroupsMe                = "usergroups_me"
 	ToolUsergroupsCreate            = "usergroups_create"
 	ToolUsergroupsUpdate            = "usergroups_update"
-	ToolUsergroupsUsersUpdate                = "usergroups_users_update"
-	ToolConversationsScheduleMessage         = "conversations_schedule_message"
-	ToolConversationsScheduledMessagesList   = "conversations_scheduled_messages_list"
-	ToolConversationsCancelScheduledMessage  = "conversations_cancel_scheduled_message"
-	ToolUsersSearch                          = "users_search"
+	ToolUsergroupsUsersUpdate = "usergroups_users_update"
+	ToolUsersSearch           = "users_search"
 	ToolDraftsCreate                         = "drafts_create"
 	ToolDraftsUpdate                         = "drafts_update"
 	ToolDraftsDelete                         = "drafts_delete"
@@ -67,9 +64,6 @@ var ValidToolNames = []string{
 	ToolUsergroupsCreate,
 	ToolUsergroupsUpdate,
 	ToolUsergroupsUsersUpdate,
-	ToolConversationsScheduleMessage,
-	ToolConversationsScheduledMessagesList,
-	ToolConversationsCancelScheduledMessage,
 	ToolUsersSearch,
 	ToolDraftsCreate,
 	ToolDraftsUpdate,
@@ -390,69 +384,6 @@ func NewMCPServer(provider *provider.ApiProvider, logger *zap.Logger, enabledToo
 				mcp.Description("Timestamp of the message to mark as read up to. If not provided, marks all messages as read."),
 			),
 		), conversationsHandler.ConversationsMarkHandler)
-	}
-
-	// Scheduled message tools require xoxp or xoxb tokens (chat.scheduleMessage does not support xoxc).
-	// For xoxc/xoxd users, use drafts_create with schedule_at parameter instead.
-	if (provider.IsOAuth() || provider.IsBotToken()) && shouldAddTool(ToolConversationsScheduleMessage, enabledTools, "SLACK_MCP_ADD_MESSAGE_TOOL") {
-		s.AddTool(mcp.NewTool(ToolConversationsScheduleMessage,
-			mcp.WithDescription("Schedule a message to be sent at a future time. Requires xoxp or xoxb token (not available with browser session tokens). For xoxc/xoxd users, use drafts_create with schedule_at parameter instead."),
-			mcp.WithTitleAnnotation("Schedule Message"),
-			mcp.WithDestructiveHintAnnotation(true),
-			mcp.WithString("channel_id",
-				mcp.Required(),
-				mcp.Description("ID of the channel in format Cxxxxxxxxxx or its name starting with #... or @... aka #general or @username_dm."),
-			),
-			mcp.WithString("thread_ts",
-				mcp.Description("Unique identifier of a thread's parent message. If provided, the scheduled message is sent to the thread."),
-			),
-			mcp.WithString("text",
-				mcp.Required(),
-				mcp.Description("Message text in specified content_type format."),
-			),
-			mcp.WithString("content_type",
-				mcp.DefaultString("text/markdown"),
-				mcp.Description("Content type of the message. Default is 'text/markdown'. Allowed values: 'text/markdown', 'text/plain'."),
-			),
-			mcp.WithString("post_at",
-				mcp.Required(),
-				mcp.Description("ISO-8601 timestamp with timezone for when to send the message. Example: '2026-04-12T09:00:00+09:00'. Must be in the future and within 120 days."),
-			),
-		), conversationsHandler.ConversationsScheduleMessageHandler)
-	}
-
-	if (provider.IsOAuth() || provider.IsBotToken()) && shouldAddTool(ToolConversationsScheduledMessagesList, enabledTools, "") {
-		s.AddTool(mcp.NewTool(ToolConversationsScheduledMessagesList,
-			mcp.WithDescription("List pending scheduled messages. Optionally filter by channel. Requires xoxp or xoxb token."),
-			mcp.WithTitleAnnotation("List Scheduled Messages"),
-			mcp.WithReadOnlyHintAnnotation(true),
-			mcp.WithString("channel_id",
-				mcp.Description("Optional. Filter by channel ID or name starting with #... or @..."),
-			),
-			mcp.WithNumber("limit",
-				mcp.DefaultNumber(100),
-				mcp.Description("Maximum number of results to return (1-1000). Default is 100."),
-			),
-			mcp.WithString("cursor",
-				mcp.Description("Cursor for pagination."),
-			),
-		), conversationsHandler.ConversationsScheduledMessagesListHandler)
-	}
-
-	if (provider.IsOAuth() || provider.IsBotToken()) && shouldAddTool(ToolConversationsCancelScheduledMessage, enabledTools, "SLACK_MCP_ADD_MESSAGE_TOOL") {
-		s.AddTool(mcp.NewTool(ToolConversationsCancelScheduledMessage,
-			mcp.WithDescription("Cancel a pending scheduled message before it is sent. Requires xoxp or xoxb token."),
-			mcp.WithTitleAnnotation("Cancel Scheduled Message"),
-			mcp.WithDestructiveHintAnnotation(true),
-			mcp.WithString("channel_id",
-				mcp.Required(),
-				mcp.Description("ID of the channel in format Cxxxxxxxxxx or its name starting with #... or @..."),
-			),
-			mcp.WithString("scheduled_message_id",
-				mcp.Required(),
-				mcp.Description("The ID of the scheduled message to cancel. Get IDs from conversations_scheduled_messages_list."),
-			),
-		), conversationsHandler.ConversationsCancelScheduledMessageHandler)
 	}
 
 	draftsHandler := handler.NewDraftsHandler(provider, logger)

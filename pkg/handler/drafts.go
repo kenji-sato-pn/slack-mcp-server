@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/korotovsky/slack-mcp-server/pkg/provider"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/slack-go/slack"
 	"go.uber.org/zap"
 )
 
@@ -28,7 +27,7 @@ type DraftCSV struct {
 type draftDestinationInput struct {
 	ChannelID string `json:"channel_id"`
 	ThreadTs  string `json:"thread_ts,omitempty"`
-	Broadcast bool   `json:"broadcast,omitempty"`
+	Broadcast *bool  `json:"broadcast,omitempty"`
 }
 
 type DraftsHandler struct {
@@ -86,18 +85,7 @@ func (h *DraftsHandler) DraftsCreateHandler(ctx context.Context, request mcp.Cal
 		return nil, errors.New("text is required")
 	}
 
-	contentType := request.GetString("content_type", "text/markdown")
-	if contentType != "text/plain" && contentType != "text/markdown" {
-		return nil, errors.New("content_type must be either 'text/plain' or 'text/markdown'")
-	}
-
-	// Convert text to blocks
-	blocks, _, err := buildTextBlocks(h.logger, text, contentType)
-	if err != nil {
-		return nil, err
-	}
-
-	blocksJSON, err := buildBlocksJSONForEdge(blocks, text)
+	blocksJSON, err := buildRichTextBlockJSON(text)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal blocks: %w", err)
 	}
@@ -182,10 +170,6 @@ func (h *DraftsHandler) DraftsUpdateHandler(ctx context.Context, request mcp.Cal
 		return nil, errors.New("text is required")
 	}
 
-	contentType := request.GetString("content_type", "text/markdown")
-	if contentType != "text/plain" && contentType != "text/markdown" {
-		return nil, errors.New("content_type must be either 'text/plain' or 'text/markdown'")
-	}
 
 	channel := request.GetString("channel_id", "")
 	if channel == "" {
@@ -201,13 +185,7 @@ func (h *DraftsHandler) DraftsUpdateHandler(ctx context.Context, request mcp.Cal
 
 	threadTs := request.GetString("thread_ts", "")
 
-	// Convert text to blocks
-	blocks, _, err := buildTextBlocks(h.logger, text, contentType)
-	if err != nil {
-		return nil, err
-	}
-
-	blocksJSON, err := buildBlocksJSONForEdge(blocks, text)
+	blocksJSON, err := buildRichTextBlockJSON(text)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal blocks: %w", err)
 	}
@@ -296,13 +274,12 @@ func (h *DraftsHandler) resolveChannelID(ctx context.Context, channel string) (s
 	return resolveChannelIDWithProvider(ctx, h.apiProvider, h.logger, channel)
 }
 
-// buildBlocksJSONForEdge converts blocks from buildTextBlocks into JSON for the Edge API.
-// If blocks is nil (plain text fallback), wraps the text in a rich_text block.
-func buildBlocksJSONForEdge(blocks []slack.Block, text string) ([]byte, error) {
-	if blocks != nil {
-		return json.Marshal(blocks)
-	}
-	plainBlock := []map[string]any{{
+// buildRichTextBlockJSON constructs a rich_text block from plain text for the Edge API.
+// The Edge API drafts endpoints ONLY accept rich_text blocks (not header, section, etc.).
+// The entire text is placed in a single rich_text_section element — Slack handles
+// newlines within the text content natively.
+func buildRichTextBlockJSON(text string) ([]byte, error) {
+	block := []map[string]any{{
 		"type": "rich_text",
 		"elements": []map[string]any{{
 			"type": "rich_text_section",
@@ -312,7 +289,7 @@ func buildBlocksJSONForEdge(blocks []slack.Block, text string) ([]byte, error) {
 			}},
 		}},
 	}}
-	return json.Marshal(plainBlock)
+	return json.Marshal(block)
 }
 
 // buildDestinationsJSON creates the JSON destinations array for the Edge API.
@@ -320,7 +297,8 @@ func buildDestinationsJSON(channelID, threadTs string) ([]byte, error) {
 	dest := draftDestinationInput{ChannelID: channelID}
 	if threadTs != "" {
 		dest.ThreadTs = threadTs
-		dest.Broadcast = false
+		b := false
+		dest.Broadcast = &b
 	}
 	return json.Marshal([]draftDestinationInput{dest})
 }

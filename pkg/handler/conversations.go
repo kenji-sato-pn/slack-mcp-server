@@ -138,6 +138,37 @@ type markParams struct {
 	channel string
 	ts      string
 }
+
+const (
+	maxScheduleDays = 120
+)
+
+type scheduleMessageParams struct {
+	channel     string
+	threadTs    string
+	text        string
+	contentType string
+	postAt      time.Time
+}
+
+type scheduledMessageListParams struct {
+	channel string
+	limit   int
+	cursor  string
+}
+
+type cancelScheduledMessageParams struct {
+	channel            string
+	scheduledMessageID string
+}
+
+type ScheduledMessageCSV struct {
+	ScheduledMessageID string `csv:"ScheduledMessageID"`
+	ChannelID          string `csv:"ChannelID"`
+	PostAt             string `csv:"PostAt"`
+	Text               string `csv:"Text"`
+}
+
 type ConversationsHandler struct {
 	apiProvider *provider.ApiProvider
 	logger      *zap.Logger
@@ -1451,6 +1482,138 @@ func (ch *ConversationsHandler) ConversationsMarkHandler(ctx context.Context, re
 	return mcp.NewToolResultText(fmt.Sprintf("Marked %s as read up to %s", channel, ts)), nil
 }
 
+// ConversationsScheduleMessageHandler schedules a message for future delivery
+func (ch *ConversationsHandler) ConversationsScheduleMessageHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	ch.logger.Debug("ConversationsScheduleMessageHandler called", zap.Any("params", request.Params))
+
+	if ready, err := ch.apiProvider.IsReady(); !ready {
+		return nil, err
+	}
+
+	params, err := ch.parseParamsToolScheduleMessage(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	blocks, plainText, err := buildTextBlocks(ch.logger, params.text, params.contentType)
+	if err != nil {
+		return nil, err
+	}
+
+	var options []slack.MsgOption
+	if params.threadTs != "" {
+		options = append(options, slack.MsgOptionTS(params.threadTs))
+	}
+	options = append(options, buildMsgOptionsFromBlocks(blocks, plainText)...)
+
+	postAtStr := strconv.FormatInt(params.postAt.Unix(), 10)
+
+	ch.logger.Debug("Scheduling Slack message",
+		zap.String("channel", params.channel),
+		zap.String("post_at", params.postAt.Format(time.RFC3339)),
+	)
+
+	respChannel, scheduledMsgID, err := ch.apiProvider.Slack().ScheduleMessageContext(ctx, params.channel, postAtStr, options...)
+	if err != nil {
+		ch.logger.Error("Slack ScheduleMessageContext failed", zap.Error(err))
+		return nil, err
+	}
+
+	result := []ScheduledMessageCSV{{
+		ScheduledMessageID: scheduledMsgID,
+		ChannelID:          respChannel,
+		PostAt:             params.postAt.Format(time.RFC3339),
+		Text:               truncateText(params.text, 100),
+	}}
+	csvBytes, err := gocsv.MarshalBytes(&result)
+	if err != nil {
+		return nil, err
+	}
+	return mcp.NewToolResultText(string(csvBytes)), nil
+}
+
+// ConversationsScheduledMessagesListHandler lists pending scheduled messages
+func (ch *ConversationsHandler) ConversationsScheduledMessagesListHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	ch.logger.Debug("ConversationsScheduledMessagesListHandler called", zap.Any("params", request.Params))
+
+	if ready, err := ch.apiProvider.IsReady(); !ready {
+		return nil, err
+	}
+
+	params, err := ch.parseParamsToolScheduledMessagesList(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	slackParams := &slack.GetScheduledMessagesParameters{
+		Channel: params.channel,
+		Cursor:  params.cursor,
+		Limit:   params.limit,
+	}
+
+	messages, nextCursor, err := ch.apiProvider.Slack().GetScheduledMessagesContext(ctx, slackParams)
+	if err != nil {
+		ch.logger.Error("Slack GetScheduledMessagesContext failed", zap.Error(err))
+		return nil, err
+	}
+
+	var csvRows []ScheduledMessageCSV
+	for _, msg := range messages {
+		postAtTime := time.Unix(int64(msg.PostAt), 0)
+		csvRows = append(csvRows, ScheduledMessageCSV{
+			ScheduledMessageID: msg.ID,
+			ChannelID:          msg.Channel,
+			PostAt:             postAtTime.Format(time.RFC3339),
+			Text:               truncateText(msg.Text, 100),
+		})
+	}
+
+	if len(csvRows) == 0 {
+		return mcp.NewToolResultText("No scheduled messages found."), nil
+	}
+
+	csvBytes, err := gocsv.MarshalBytes(&csvRows)
+	if err != nil {
+		return nil, err
+	}
+
+	output := string(csvBytes)
+	if nextCursor != "" {
+		output += "\nnext_cursor: " + nextCursor
+	}
+	return mcp.NewToolResultText(output), nil
+}
+
+// ConversationsCancelScheduledMessageHandler cancels a pending scheduled message
+func (ch *ConversationsHandler) ConversationsCancelScheduledMessageHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	ch.logger.Debug("ConversationsCancelScheduledMessageHandler called", zap.Any("params", request.Params))
+
+	if ready, err := ch.apiProvider.IsReady(); !ready {
+		return nil, err
+	}
+
+	params, err := ch.parseParamsToolCancelScheduledMessage(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	ch.logger.Debug("Cancelling scheduled message",
+		zap.String("channel", params.channel),
+		zap.String("scheduled_message_id", params.scheduledMessageID),
+	)
+
+	_, err = ch.apiProvider.Slack().DeleteScheduledMessageContext(ctx, &slack.DeleteScheduledMessageParameters{
+		Channel:            params.channel,
+		ScheduledMessageID: params.scheduledMessageID,
+	})
+	if err != nil {
+		ch.logger.Error("Slack DeleteScheduledMessageContext failed", zap.Error(err))
+		return nil, err
+	}
+
+	return mcp.NewToolResultText(fmt.Sprintf("Successfully cancelled scheduled message %s in channel %s", params.scheduledMessageID, params.channel)), nil
+}
+
 // sortChannelsByPriority sorts channels: DMs > group_dm > partner > internal
 func (ch *ConversationsHandler) sortChannelsByPriority(channels []UnreadChannel) {
 	priority := map[string]int{
@@ -1804,6 +1967,117 @@ func (ch *ConversationsHandler) parseParamsToolAddMessage(ctx context.Context, r
 	}, nil
 }
 
+func (ch *ConversationsHandler) parseParamsToolScheduleMessage(ctx context.Context, request mcp.CallToolRequest) (*scheduleMessageParams, error) {
+	toolConfig := os.Getenv("SLACK_MCP_ADD_MESSAGE_TOOL")
+	enabledTools := os.Getenv("SLACK_MCP_ENABLED_TOOLS")
+
+	if toolConfig == "" {
+		if !strings.Contains(enabledTools, "conversations_schedule_message") {
+			ch.logger.Error("Schedule-message tool disabled by default")
+			return nil, errors.New(
+				"by default, the conversations_schedule_message tool is disabled. " +
+					"To enable it, set the SLACK_MCP_ADD_MESSAGE_TOOL environment variable to true, 1, or comma separated list of channels",
+			)
+		}
+		toolConfig = "true"
+	}
+
+	channel := request.GetString("channel_id", "")
+	if channel == "" {
+		return nil, errors.New("channel_id must be a string")
+	}
+	channel, err := ch.resolveChannelID(ctx, channel)
+	if err != nil {
+		return nil, err
+	}
+	if !isChannelAllowedForConfig(channel, toolConfig) {
+		return nil, fmt.Errorf("conversations_schedule_message tool is not allowed for channel %q, applied policy: %s", channel, toolConfig)
+	}
+
+	threadTs := request.GetString("thread_ts", "")
+	if threadTs != "" && !strings.Contains(threadTs, ".") {
+		return nil, errors.New("thread_ts must be a valid timestamp in format 1234567890.123456")
+	}
+
+	msgText := request.GetString("text", "")
+	if msgText == "" {
+		return nil, errors.New("text must be a string")
+	}
+
+	contentType := request.GetString("content_type", "text/markdown")
+	if contentType != "text/plain" && contentType != "text/markdown" {
+		return nil, errors.New("content_type must be either 'text/plain' or 'text/markdown'")
+	}
+
+	postAtStr := request.GetString("post_at", "")
+	if postAtStr == "" {
+		return nil, errors.New("post_at must be an ISO-8601 timestamp with timezone, e.g. 2026-04-12T09:00:00+09:00")
+	}
+	postAt, err := time.Parse(time.RFC3339, postAtStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid post_at: must be ISO-8601 with timezone (RFC3339), got %q: %w", postAtStr, err)
+	}
+	if postAt.Before(time.Now()) {
+		return nil, errors.New("post_at must be in the future")
+	}
+	if postAt.After(time.Now().AddDate(0, 0, maxScheduleDays)) {
+		return nil, fmt.Errorf("post_at must be within %d days from now", maxScheduleDays)
+	}
+
+	return &scheduleMessageParams{
+		channel:     channel,
+		threadTs:    threadTs,
+		text:        msgText,
+		contentType: contentType,
+		postAt:      postAt,
+	}, nil
+}
+
+func (ch *ConversationsHandler) parseParamsToolScheduledMessagesList(ctx context.Context, request mcp.CallToolRequest) (*scheduledMessageListParams, error) {
+	channel := request.GetString("channel_id", "")
+	if channel != "" {
+		var err error
+		channel, err = ch.resolveChannelID(ctx, channel)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	limit := request.GetInt("limit", 100)
+	if limit < 1 || limit > 1000 {
+		return nil, errors.New("limit must be between 1 and 1000")
+	}
+
+	cursor := request.GetString("cursor", "")
+
+	return &scheduledMessageListParams{
+		channel: channel,
+		limit:   limit,
+		cursor:  cursor,
+	}, nil
+}
+
+func (ch *ConversationsHandler) parseParamsToolCancelScheduledMessage(ctx context.Context, request mcp.CallToolRequest) (*cancelScheduledMessageParams, error) {
+	channel := request.GetString("channel_id", "")
+	if channel == "" {
+		return nil, errors.New("channel_id is required")
+	}
+	channel, err := ch.resolveChannelID(ctx, channel)
+	if err != nil {
+		return nil, err
+	}
+
+	scheduledMessageID := request.GetString("scheduled_message_id", "")
+	if scheduledMessageID == "" {
+		return nil, errors.New("scheduled_message_id is required")
+	}
+
+	return &cancelScheduledMessageParams{
+		channel:            channel,
+		scheduledMessageID: scheduledMessageID,
+	}, nil
+}
+
 func (ch *ConversationsHandler) parseParamsToolReaction(ctx context.Context, request mcp.CallToolRequest) (*addReactionParams, error) {
 	toolConfig := os.Getenv("SLACK_MCP_REACTION_TOOL")
 	enabledTools := os.Getenv("SLACK_MCP_ENABLED_TOOLS")
@@ -2126,6 +2400,15 @@ func marshalMessagesToCSV(messages []Message) (*mcp.CallToolResult, error) {
 		return nil, err
 	}
 	return mcp.NewToolResultText(string(csvBytes)), nil
+}
+
+// truncateText truncates a string to maxLen characters, appending "..." if truncated.
+func truncateText(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "..."
 }
 
 func getUserInfo(userID string, usersMap map[string]slack.User) (userName, realName string, ok bool) {

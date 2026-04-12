@@ -40,8 +40,11 @@ const (
 	ToolUsergroupsMe                = "usergroups_me"
 	ToolUsergroupsCreate            = "usergroups_create"
 	ToolUsergroupsUpdate            = "usergroups_update"
-	ToolUsergroupsUsersUpdate       = "usergroups_users_update"
-	ToolUsersSearch                 = "users_search"
+	ToolUsergroupsUsersUpdate                = "usergroups_users_update"
+	ToolConversationsScheduleMessage         = "conversations_schedule_message"
+	ToolConversationsScheduledMessagesList   = "conversations_scheduled_messages_list"
+	ToolConversationsCancelScheduledMessage  = "conversations_cancel_scheduled_message"
+	ToolUsersSearch                          = "users_search"
 )
 
 var ValidToolNames = []string{
@@ -61,6 +64,9 @@ var ValidToolNames = []string{
 	ToolUsergroupsCreate,
 	ToolUsergroupsUpdate,
 	ToolUsergroupsUsersUpdate,
+	ToolConversationsScheduleMessage,
+	ToolConversationsScheduledMessagesList,
+	ToolConversationsCancelScheduledMessage,
 	ToolUsersSearch,
 }
 
@@ -379,6 +385,68 @@ func NewMCPServer(provider *provider.ApiProvider, logger *zap.Logger, enabledToo
 			),
 		), conversationsHandler.ConversationsMarkHandler)
 	}
+
+	if shouldAddTool(ToolConversationsScheduleMessage, enabledTools, "SLACK_MCP_ADD_MESSAGE_TOOL") {
+		s.AddTool(mcp.NewTool(ToolConversationsScheduleMessage,
+			mcp.WithDescription("Schedule a message to be sent at a future time. The message appears in the channel at the specified time."),
+			mcp.WithTitleAnnotation("Schedule Message"),
+			mcp.WithDestructiveHintAnnotation(true),
+			mcp.WithString("channel_id",
+				mcp.Required(),
+				mcp.Description("ID of the channel in format Cxxxxxxxxxx or its name starting with #... or @... aka #general or @username_dm."),
+			),
+			mcp.WithString("thread_ts",
+				mcp.Description("Unique identifier of a thread's parent message. If provided, the scheduled message is sent to the thread."),
+			),
+			mcp.WithString("text",
+				mcp.Required(),
+				mcp.Description("Message text in specified content_type format."),
+			),
+			mcp.WithString("content_type",
+				mcp.DefaultString("text/markdown"),
+				mcp.Description("Content type of the message. Default is 'text/markdown'. Allowed values: 'text/markdown', 'text/plain'."),
+			),
+			mcp.WithString("post_at",
+				mcp.Required(),
+				mcp.Description("ISO-8601 timestamp with timezone for when to send the message. Example: '2026-04-12T09:00:00+09:00'. Must be in the future and within 120 days."),
+			),
+		), conversationsHandler.ConversationsScheduleMessageHandler)
+	}
+
+	if shouldAddTool(ToolConversationsScheduledMessagesList, enabledTools, "") {
+		s.AddTool(mcp.NewTool(ToolConversationsScheduledMessagesList,
+			mcp.WithDescription("List pending scheduled messages. Optionally filter by channel."),
+			mcp.WithTitleAnnotation("List Scheduled Messages"),
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithString("channel_id",
+				mcp.Description("Optional. Filter by channel ID or name starting with #... or @..."),
+			),
+			mcp.WithNumber("limit",
+				mcp.DefaultNumber(100),
+				mcp.Description("Maximum number of results to return (1-1000). Default is 100."),
+			),
+			mcp.WithString("cursor",
+				mcp.Description("Cursor for pagination."),
+			),
+		), conversationsHandler.ConversationsScheduledMessagesListHandler)
+	}
+
+	if shouldAddTool(ToolConversationsCancelScheduledMessage, enabledTools, "SLACK_MCP_ADD_MESSAGE_TOOL") {
+		s.AddTool(mcp.NewTool(ToolConversationsCancelScheduledMessage,
+			mcp.WithDescription("Cancel a pending scheduled message before it is sent."),
+			mcp.WithTitleAnnotation("Cancel Scheduled Message"),
+			mcp.WithDestructiveHintAnnotation(true),
+			mcp.WithString("channel_id",
+				mcp.Required(),
+				mcp.Description("ID of the channel in format Cxxxxxxxxxx or its name starting with #... or @..."),
+			),
+			mcp.WithString("scheduled_message_id",
+				mcp.Required(),
+				mcp.Description("The ID of the scheduled message to cancel. Get IDs from conversations_scheduled_messages_list."),
+			),
+		), conversationsHandler.ConversationsCancelScheduledMessageHandler)
+	}
+
 	channelsHandler := handler.NewChannelsHandler(provider, logger)
 	usergroupsHandler := handler.NewUsergroupsHandler(provider, logger)
 

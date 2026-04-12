@@ -107,21 +107,9 @@ func (h *DraftsHandler) DraftsCreateHandler(ctx context.Context, request mcp.Cal
 		return nil, fmt.Errorf("failed to marshal destinations: %w", err)
 	}
 
-	// Parse optional schedule_at for scheduled drafts
-	var dateScheduled int64
-	scheduleAt := request.GetString("schedule_at", "")
-	if scheduleAt != "" {
-		t, err := time.Parse(time.RFC3339, scheduleAt)
-		if err != nil {
-			return nil, fmt.Errorf("invalid schedule_at: must be ISO-8601 with timezone (RFC3339), got %q: %w", scheduleAt, err)
-		}
-		if t.Before(time.Now()) {
-			return nil, errors.New("schedule_at must be in the future")
-		}
-		if t.After(time.Now().AddDate(0, 0, maxScheduleDays)) {
-			return nil, fmt.Errorf("schedule_at must be within %d days from now", maxScheduleDays)
-		}
-		dateScheduled = t.Unix()
+	dateScheduled, err := parseScheduleAt(request.GetString("schedule_at", ""))
+	if err != nil {
+		return nil, err
 	}
 
 	clientMsgID := uuid.New().String()
@@ -167,6 +155,18 @@ func (h *DraftsHandler) DraftsUpdateHandler(ctx context.Context, request mcp.Cal
 		return nil, err
 	}
 
+	toolConfig := os.Getenv("SLACK_MCP_ADD_MESSAGE_TOOL")
+	enabledTools := os.Getenv("SLACK_MCP_ENABLED_TOOLS")
+	if toolConfig == "" {
+		if !strings.Contains(enabledTools, "drafts_update") {
+			return nil, errors.New(
+				"by default, the drafts_update tool is disabled. " +
+					"To enable it, set the SLACK_MCP_ADD_MESSAGE_TOOL environment variable to true, 1, or comma separated list of channels",
+			)
+		}
+		toolConfig = "true"
+	}
+
 	draftID := request.GetString("draft_id", "")
 	if draftID == "" {
 		return nil, errors.New("draft_id is required")
@@ -195,6 +195,9 @@ func (h *DraftsHandler) DraftsUpdateHandler(ctx context.Context, request mcp.Cal
 	if err != nil {
 		return nil, err
 	}
+	if !isChannelAllowedForConfig(channel, toolConfig) {
+		return nil, fmt.Errorf("drafts_update tool is not allowed for channel %q, applied policy: %s", channel, toolConfig)
+	}
 
 	threadTs := request.GetString("thread_ts", "")
 
@@ -216,25 +219,11 @@ func (h *DraftsHandler) DraftsUpdateHandler(ctx context.Context, request mcp.Cal
 
 	clientMsgID := uuid.New().String()
 
-	// Parse optional schedule_at for scheduled drafts
-	var dateScheduled int64
-	scheduleAt := request.GetString("schedule_at", "")
-	if scheduleAt != "" {
-		t, err := time.Parse(time.RFC3339, scheduleAt)
-		if err != nil {
-			return nil, fmt.Errorf("invalid schedule_at: must be ISO-8601 with timezone (RFC3339), got %q: %w", scheduleAt, err)
-		}
-		if t.Before(time.Now()) {
-			return nil, errors.New("schedule_at must be in the future")
-		}
-		if t.After(time.Now().AddDate(0, 0, maxScheduleDays)) {
-			return nil, fmt.Errorf("schedule_at must be within %d days from now", maxScheduleDays)
-		}
-		dateScheduled = t.Unix()
+	dateScheduled, err := parseScheduleAt(request.GetString("schedule_at", ""))
+	if err != nil {
+		return nil, err
 	}
 
-	// Convert last_updated_ts "1775966853.146997" to milliseconds "1775966853146"
-	// The API expects milliseconds as client_last_updated_ts
 	lastUpdatedMs := convertTsToMillis(clientLastUpdatedTs)
 
 	draft, err := h.apiProvider.Slack().DraftsUpdate(ctx, draftID, lastUpdatedMs, string(blocksJSON), clientMsgID, string(destJSON), dateScheduled)
@@ -268,6 +257,17 @@ func (h *DraftsHandler) DraftsDeleteHandler(ctx context.Context, request mcp.Cal
 
 	if ready, err := h.apiProvider.IsReady(); !ready {
 		return nil, err
+	}
+
+	toolConfig := os.Getenv("SLACK_MCP_ADD_MESSAGE_TOOL")
+	enabledTools := os.Getenv("SLACK_MCP_ENABLED_TOOLS")
+	if toolConfig == "" {
+		if !strings.Contains(enabledTools, "drafts_delete") {
+			return nil, errors.New(
+				"by default, the drafts_delete tool is disabled. " +
+					"To enable it, set the SLACK_MCP_ADD_MESSAGE_TOOL environment variable to true, 1, or comma separated list of channels",
+			)
+		}
 	}
 
 	draftID := request.GetString("draft_id", "")
@@ -325,7 +325,29 @@ func buildDestinationsJSON(channelID, threadTs string) ([]byte, error) {
 	return json.Marshal([]draftDestinationInput{dest})
 }
 
-// convertTsToMillis converts a Slack timestamp like "1775966853.146997" to milliseconds "1775966853146".
+// parseScheduleAt parses an optional ISO-8601 schedule_at string and returns a Unix timestamp.
+// Returns 0 if the input is empty (no scheduling). Returns an error for invalid/past/too-far-future values.
+func parseScheduleAt(raw string) (int64, error) {
+	if raw == "" {
+		return 0, nil
+	}
+	t, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid schedule_at: must be ISO-8601 with timezone (RFC3339), got %q: %w", raw, err)
+	}
+	now := time.Now()
+	if t.Before(now) {
+		return 0, errors.New("schedule_at must be in the future")
+	}
+	if t.After(now.AddDate(0, 0, maxScheduleDays)) {
+		return 0, fmt.Errorf("schedule_at must be within %d days from now", maxScheduleDays)
+	}
+	return t.Unix(), nil
+}
+
+// convertTsToMillis converts a Slack last_updated_ts value to the millisecond format
+// expected by the Edge API's client_last_updated_ts field.
+// Example: "1775966853.146997" → "1775966853146" (takes first 3 chars of fractional part).
 // If the input doesn't contain a dot, it's returned as-is (assumed already in ms).
 func convertTsToMillis(ts string) string {
 	parts := strings.SplitN(ts, ".", 2)

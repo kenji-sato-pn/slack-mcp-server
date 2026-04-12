@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -133,6 +134,47 @@ func TestBuildMsgOptionsFromBlocks(t *testing.T) {
 	t.Run("nil blocks returns disable markdown + text", func(t *testing.T) {
 		options := buildMsgOptionsFromBlocks(nil, "plain text")
 		assert.Len(t, options, 2)
+	})
+}
+
+func TestParseScheduleAt(t *testing.T) {
+	t.Run("empty string returns 0", func(t *testing.T) {
+		result, err := parseScheduleAt("")
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), result)
+	})
+
+	t.Run("valid future ISO-8601 returns unix timestamp", func(t *testing.T) {
+		future := time.Now().Add(1 * time.Hour).Format(time.RFC3339)
+		result, err := parseScheduleAt(future)
+		require.NoError(t, err)
+		assert.Greater(t, result, int64(0))
+	})
+
+	t.Run("past time returns error", func(t *testing.T) {
+		past := time.Now().Add(-1 * time.Hour).Format(time.RFC3339)
+		_, err := parseScheduleAt(past)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must be in the future")
+	})
+
+	t.Run("too far in future returns error", func(t *testing.T) {
+		tooFar := time.Now().AddDate(0, 0, 121).Format(time.RFC3339)
+		_, err := parseScheduleAt(tooFar)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "within 120 days")
+	})
+
+	t.Run("invalid format returns error", func(t *testing.T) {
+		_, err := parseScheduleAt("not-a-date")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid schedule_at")
+	})
+
+	t.Run("missing timezone returns error", func(t *testing.T) {
+		_, err := parseScheduleAt("2026-04-13T09:00:00")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid schedule_at")
 	})
 }
 

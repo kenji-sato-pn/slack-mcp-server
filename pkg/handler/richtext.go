@@ -175,8 +175,12 @@ func parseBlocks(text string) []any {
 			continue
 		}
 
-		// Empty line: skip (acts as paragraph separator)
+		// Empty line: output as empty rich_text_section to preserve paragraph spacing
 		if strings.TrimSpace(line) == "" {
+			elements = append(elements, richTextSection{
+				Type:     "rich_text_section",
+				Elements: []richTextElement{{Type: "text", Text: "\n"}},
+			})
 			i++
 			continue
 		}

@@ -153,8 +153,8 @@ func TestMarkdownToRichTextJSON(t *testing.T) {
 
 		blocks := parseRichTextBlocks(t, result)
 		require.Len(t, blocks, 1)
-		// Should have: section (進捗:), list (2 items), section (次のセクション...), section (最後の段落。)
-		require.Equal(t, 4, len(blocks[0].Elements))
+		// Should have: section (進捗:), list (2 items), \n section, section (次のセクション...), \n section, section (最後の段落。)
+		require.Equal(t, 6, len(blocks[0].Elements))
 
 		// First element: paragraph with bold
 		section0 := blocks[0].Elements[0].(map[string]any)
@@ -164,12 +164,20 @@ func TestMarkdownToRichTextJSON(t *testing.T) {
 		list := blocks[0].Elements[1].(map[string]any)
 		assert.Equal(t, "rich_text_list", list["type"])
 
-		// Third: another paragraph
-		section2 := blocks[0].Elements[2].(map[string]any)
+		// Third: empty line separator
+		sep1 := blocks[0].Elements[2].(map[string]any)
+		assert.Equal(t, "rich_text_section", sep1["type"])
+
+		// Fourth: another paragraph
+		section2 := blocks[0].Elements[3].(map[string]any)
 		assert.Equal(t, "rich_text_section", section2["type"])
 
-		// Fourth: final paragraph
-		section3 := blocks[0].Elements[3].(map[string]any)
+		// Fifth: empty line separator
+		sep2 := blocks[0].Elements[4].(map[string]any)
+		assert.Equal(t, "rich_text_section", sep2["type"])
+
+		// Sixth: final paragraph
+		section3 := blocks[0].Elements[5].(map[string]any)
 		assert.Equal(t, "rich_text_section", section3["type"])
 	})
 

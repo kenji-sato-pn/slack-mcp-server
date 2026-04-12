@@ -85,7 +85,6 @@ func (h *DraftsHandler) DraftsCreateHandler(ctx context.Context, request mcp.Cal
 		return nil, errors.New("text is required")
 	}
 
-
 	blocksJSON, err := buildRichTextBlockJSON(text)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal blocks: %w", err)

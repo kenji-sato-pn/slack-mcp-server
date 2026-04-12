@@ -77,9 +77,12 @@ func TestBuildRichTextBlockJSON(t *testing.T) {
 }
 
 func TestBuildDestinationsJSON(t *testing.T) {
-	t.Run("channel only", func(t *testing.T) {
+	t.Run("channel only omits broadcast from JSON", func(t *testing.T) {
 		result, err := buildDestinationsJSON("C12345", "")
 		require.NoError(t, err)
+
+		// Verify wire format: broadcast must be absent
+		assert.NotContains(t, string(result), "broadcast")
 
 		var dests []draftDestinationInput
 		err = json.Unmarshal(result, &dests)
@@ -87,11 +90,15 @@ func TestBuildDestinationsJSON(t *testing.T) {
 		require.Len(t, dests, 1)
 		assert.Equal(t, "C12345", dests[0].ChannelID)
 		assert.Empty(t, dests[0].ThreadTs)
+		assert.Nil(t, dests[0].Broadcast)
 	})
 
-	t.Run("channel with thread", func(t *testing.T) {
+	t.Run("channel with thread includes broadcast false", func(t *testing.T) {
 		result, err := buildDestinationsJSON("C12345", "1234567890.123456")
 		require.NoError(t, err)
+
+		// Verify wire format: broadcast must be present as false
+		assert.Contains(t, string(result), `"broadcast":false`)
 
 		var dests []draftDestinationInput
 		err = json.Unmarshal(result, &dests)

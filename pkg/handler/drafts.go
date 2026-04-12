@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/korotovsky/slack-mcp-server/pkg/provider"
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/slack-go/slack"
 	"go.uber.org/zap"
 )
 
@@ -21,6 +22,12 @@ type DraftCSV struct {
 	ThreadTs  string `csv:"ThreadTs"`
 	UpdatedAt string `csv:"UpdatedAt"`
 	Text      string `csv:"Text"`
+}
+
+type draftDestinationInput struct {
+	ChannelID string `json:"channel_id"`
+	ThreadTs  string `json:"thread_ts,omitempty"`
+	Broadcast bool   `json:"broadcast,omitempty"`
 }
 
 type DraftsHandler struct {
@@ -89,40 +96,12 @@ func (h *DraftsHandler) DraftsCreateHandler(ctx context.Context, request mcp.Cal
 		return nil, err
 	}
 
-	// For plain text fallback, wrap in a rich_text block
-	var blocksJSON []byte
-	if blocks != nil {
-		blocksJSON, err = json.Marshal(blocks)
-	} else {
-		// Wrap plain text in rich_text block (Slack requires blocks, not raw text)
-		plainBlock := []map[string]any{{
-			"type": "rich_text",
-			"elements": []map[string]any{{
-				"type": "rich_text_section",
-				"elements": []map[string]any{{
-					"type": "text",
-					"text": text,
-				}},
-			}},
-		}}
-		blocksJSON, err = json.Marshal(plainBlock)
-	}
+	blocksJSON, err := buildBlocksJSONForEdge(blocks, text)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal blocks: %w", err)
 	}
 
-	// Build destinations JSON
-	type destination struct {
-		ChannelID string `json:"channel_id"`
-		ThreadTs  string `json:"thread_ts,omitempty"`
-		Broadcast bool   `json:"broadcast,omitempty"`
-	}
-	dest := destination{ChannelID: channel}
-	if threadTs != "" {
-		dest.ThreadTs = threadTs
-		dest.Broadcast = false
-	}
-	destJSON, err := json.Marshal([]destination{dest})
+	destJSON, err := buildDestinationsJSON(channel, threadTs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal destinations: %w", err)
 	}
@@ -206,36 +185,12 @@ func (h *DraftsHandler) DraftsUpdateHandler(ctx context.Context, request mcp.Cal
 		return nil, err
 	}
 
-	var blocksJSON []byte
-	if blocks != nil {
-		blocksJSON, err = json.Marshal(blocks)
-	} else {
-		plainBlock := []map[string]any{{
-			"type": "rich_text",
-			"elements": []map[string]any{{
-				"type": "rich_text_section",
-				"elements": []map[string]any{{
-					"type": "text",
-					"text": text,
-				}},
-			}},
-		}}
-		blocksJSON, err = json.Marshal(plainBlock)
-	}
+	blocksJSON, err := buildBlocksJSONForEdge(blocks, text)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal blocks: %w", err)
 	}
 
-	type destination struct {
-		ChannelID string `json:"channel_id"`
-		ThreadTs  string `json:"thread_ts,omitempty"`
-		Broadcast bool   `json:"broadcast,omitempty"`
-	}
-	dest := destination{ChannelID: channel}
-	if threadTs != "" {
-		dest.ThreadTs = threadTs
-	}
-	destJSON, err := json.Marshal([]destination{dest})
+	destJSON, err := buildDestinationsJSON(channel, threadTs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal destinations: %w", err)
 	}
@@ -302,48 +257,36 @@ func (h *DraftsHandler) DraftsDeleteHandler(ctx context.Context, request mcp.Cal
 
 // resolveChannelID resolves channel names (#general, @user) to IDs.
 func (h *DraftsHandler) resolveChannelID(ctx context.Context, channel string) (string, error) {
-	if !strings.HasPrefix(channel, "#") && !strings.HasPrefix(channel, "@") {
-		return channel, nil
+	return resolveChannelIDWithProvider(ctx, h.apiProvider, h.logger, channel)
+}
+
+// buildBlocksJSONForEdge converts blocks from buildTextBlocks into JSON for the Edge API.
+// If blocks is nil (plain text fallback), wraps the text in a rich_text block.
+func buildBlocksJSONForEdge(blocks []slack.Block, text string) ([]byte, error) {
+	if blocks != nil {
+		return json.Marshal(blocks)
 	}
+	plainBlock := []map[string]any{{
+		"type": "rich_text",
+		"elements": []map[string]any{{
+			"type": "rich_text_section",
+			"elements": []map[string]any{{
+				"type": "text",
+				"text": text,
+			}},
+		}},
+	}}
+	return json.Marshal(plainBlock)
+}
 
-	// First attempt: try to resolve from current cache
-	channelsMaps := h.apiProvider.ProvideChannelsMaps()
-	chn, ok := channelsMaps.ChannelsInv[channel]
-	if ok {
-		return channelsMaps.Channels[chn].ID, nil
+// buildDestinationsJSON creates the JSON destinations array for the Edge API.
+func buildDestinationsJSON(channelID, threadTs string) ([]byte, error) {
+	dest := draftDestinationInput{ChannelID: channelID}
+	if threadTs != "" {
+		dest.ThreadTs = threadTs
+		dest.Broadcast = false
 	}
-
-	// Channel not found - try refreshing cache and retry once
-	h.logger.Debug("Channel not found in cache, attempting refresh",
-		zap.String("channel", channel))
-
-	refreshErr := h.apiProvider.ForceRefreshChannels(ctx)
-	wasRateLimited := errors.Is(refreshErr, provider.ErrRefreshRateLimited)
-
-	if refreshErr != nil && !wasRateLimited {
-		h.logger.Error("Failed to refresh channels cache",
-			zap.String("channel", channel),
-			zap.Error(refreshErr))
-		return "", fmt.Errorf("channel %q not found and cache refresh failed: %w", channel, refreshErr)
-	}
-
-	// If rate-limited, cache wasn't refreshed - no point in a second lookup
-	if wasRateLimited {
-		h.logger.Warn("Channel not found; cache refresh was rate-limited",
-			zap.String("channel", channel))
-		return "", fmt.Errorf("channel %q not found (cache refresh was rate-limited, try again later)", channel)
-	}
-
-	// Second attempt after successful refresh
-	channelsMaps = h.apiProvider.ProvideChannelsMaps()
-	chn, ok = channelsMaps.ChannelsInv[channel]
-	if !ok {
-		h.logger.Error("Channel not found even after cache refresh",
-			zap.String("channel", channel))
-		return "", fmt.Errorf("channel %q not found", channel)
-	}
-
-	return channelsMaps.Channels[chn].ID, nil
+	return json.Marshal([]draftDestinationInput{dest})
 }
 
 // convertTsToMillis converts a Slack timestamp like "1775966853.146997" to milliseconds "1775966853146".

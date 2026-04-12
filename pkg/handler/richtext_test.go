@@ -242,6 +242,25 @@ func TestParseInline(t *testing.T) {
 		assert.Equal(t, " for info", elements[1].Text)
 	})
 
+	t.Run("multiple markdown links in one line", func(t *testing.T) {
+		elements := parseInline("[a](https://a.com) and [b](https://b.com)")
+		require.Len(t, elements, 3)
+		assert.Equal(t, "link", elements[0].Type)
+		assert.Equal(t, "a", elements[0].Text)
+		assert.Equal(t, " and ", elements[1].Text)
+		assert.Equal(t, "link", elements[2].Type)
+		assert.Equal(t, "b", elements[2].Text)
+	})
+
+	t.Run("bold then markdown link", func(t *testing.T) {
+		elements := parseInline("**bold** [link](https://x.com)")
+		require.Len(t, elements, 3)
+		assert.True(t, elements[0].Style.Bold)
+		assert.Equal(t, " ", elements[1].Text)
+		assert.Equal(t, "link", elements[2].Type)
+		assert.Equal(t, "link", elements[2].Text)
+	})
+
 	t.Run("underscore in identifier not treated as italic", func(t *testing.T) {
 		elements := parseInline("use channel_id field")
 		require.Len(t, elements, 1)

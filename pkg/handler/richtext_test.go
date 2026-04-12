@@ -146,6 +146,29 @@ func TestMarkdownToRichTextJSON(t *testing.T) {
 		assert.Equal(t, "bullet", list["style"])
 	})
 
+	t.Run("mixed content with paragraphs and lists", func(t *testing.T) {
+		input := "**進捗**:\n• 1つ目の項目\n• 2つ目の項目\n\n**次のセクション**: ここは別段落。\n\n最後の段落。"
+		result, err := markdownToRichTextJSON(input)
+		require.NoError(t, err)
+
+		blocks := parseRichTextBlocks(t, result)
+		require.Len(t, blocks, 1)
+		// Should have: section (進捗: + \n + 次のセクション... + \n + 最後の段落。), list (2 items)
+		// Text lines are in one section, list is separate
+		require.GreaterOrEqual(t, len(blocks[0].Elements), 2)
+
+		// Verify list exists
+		found := false
+		for _, el := range blocks[0].Elements {
+			m := el.(map[string]any)
+			if m["type"] == "rich_text_list" {
+				found = true
+				assert.Equal(t, "bullet", m["style"])
+			}
+		}
+		assert.True(t, found, "bullet list should be present")
+	})
+
 	t.Run("heading converted to bold", func(t *testing.T) {
 		result, err := markdownToRichTextJSON("## My Heading")
 		require.NoError(t, err)

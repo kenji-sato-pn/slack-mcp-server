@@ -111,6 +111,10 @@ func (h *DraftsHandler) DraftsCreateHandler(ctx context.Context, request mcp.Cal
 	draft, err := h.apiProvider.Slack().DraftsCreate(ctx, string(blocksJSON), clientMsgID, string(destJSON), dateScheduled)
 	if err != nil {
 		h.logger.Error("DraftsCreate failed", zap.Error(err))
+		// Provide actionable guidance when a draft already exists for this channel
+		if strings.Contains(err.Error(), "attached_draft_exists") {
+			return nil, fmt.Errorf("a draft already exists for this channel. Use drafts_update with the existing draft's draft_id and client_last_updated_ts to modify it, or delete it first with drafts_delete")
+		}
 		return nil, fmt.Errorf("drafts.create failed: %w", err)
 	}
 

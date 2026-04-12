@@ -27,7 +27,7 @@ type DraftCSV struct {
 type draftDestinationInput struct {
 	ChannelID string `json:"channel_id"`
 	ThreadTs  string `json:"thread_ts,omitempty"`
-	Broadcast bool   `json:"broadcast,omitempty"`
+	Broadcast *bool  `json:"broadcast,omitempty"`
 }
 
 type DraftsHandler struct {
@@ -277,21 +277,18 @@ func (h *DraftsHandler) resolveChannelID(ctx context.Context, channel string) (s
 
 // buildRichTextBlockJSON constructs a rich_text block from plain text for the Edge API.
 // The Edge API drafts endpoints ONLY accept rich_text blocks (not header, section, etc.).
-// Text is split by newlines into separate rich_text_section elements to preserve line breaks.
+// The entire text is placed in a single rich_text_section element — Slack handles
+// newlines within the text content natively.
 func buildRichTextBlockJSON(text string) ([]byte, error) {
-	var sections []map[string]any
-	for _, line := range strings.Split(text, "\n") {
-		sections = append(sections, map[string]any{
+	block := []map[string]any{{
+		"type": "rich_text",
+		"elements": []map[string]any{{
 			"type": "rich_text_section",
 			"elements": []map[string]any{{
 				"type": "text",
-				"text": line,
+				"text": text,
 			}},
-		})
-	}
-	block := []map[string]any{{
-		"type":     "rich_text",
-		"elements": sections,
+		}},
 	}}
 	return json.Marshal(block)
 }
@@ -301,7 +298,8 @@ func buildDestinationsJSON(channelID, threadTs string) ([]byte, error) {
 	dest := draftDestinationInput{ChannelID: channelID}
 	if threadTs != "" {
 		dest.ThreadTs = threadTs
-		dest.Broadcast = false
+		b := false
+		dest.Broadcast = &b
 	}
 	return json.Marshal([]draftDestinationInput{dest})
 }

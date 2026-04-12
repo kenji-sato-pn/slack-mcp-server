@@ -56,8 +56,9 @@ func TestBuildRichTextBlockJSON(t *testing.T) {
 		assert.Equal(t, "hello world", textEl["text"])
 	})
 
-	t.Run("multiline text creates section per line", func(t *testing.T) {
-		result, err := buildRichTextBlockJSON("line1\nline2\nline3")
+	t.Run("multiline text preserved in single section", func(t *testing.T) {
+		input := "line1\nline2\nline3"
+		result, err := buildRichTextBlockJSON(input)
 		require.NoError(t, err)
 
 		var blocks []map[string]any
@@ -66,14 +67,12 @@ func TestBuildRichTextBlockJSON(t *testing.T) {
 		require.Len(t, blocks, 1)
 
 		elements := blocks[0]["elements"].([]any)
-		require.Len(t, elements, 3)
+		require.Len(t, elements, 1)
 
-		for i, expected := range []string{"line1", "line2", "line3"} {
-			section := elements[i].(map[string]any)
-			textElements := section["elements"].([]any)
-			textEl := textElements[0].(map[string]any)
-			assert.Equal(t, expected, textEl["text"])
-		}
+		section := elements[0].(map[string]any)
+		textElements := section["elements"].([]any)
+		textEl := textElements[0].(map[string]any)
+		assert.Equal(t, input, textEl["text"])
 	})
 }
 
@@ -100,7 +99,8 @@ func TestBuildDestinationsJSON(t *testing.T) {
 		require.Len(t, dests, 1)
 		assert.Equal(t, "C12345", dests[0].ChannelID)
 		assert.Equal(t, "1234567890.123456", dests[0].ThreadTs)
-		assert.False(t, dests[0].Broadcast)
+		require.NotNil(t, dests[0].Broadcast)
+		assert.False(t, *dests[0].Broadcast)
 	})
 }
 

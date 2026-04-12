@@ -70,7 +70,7 @@ func TestMarkdownToRichTextJSON(t *testing.T) {
 		assert.Equal(t, true, style["strike"])
 	})
 
-	t.Run("URL", func(t *testing.T) {
+	t.Run("bare URL without text field for unfurl", func(t *testing.T) {
 		result, err := markdownToRichTextJSON("see https://example.com for details")
 		require.NoError(t, err)
 
@@ -78,6 +78,21 @@ func TestMarkdownToRichTextJSON(t *testing.T) {
 		require.Len(t, elements, 3)
 		assert.Equal(t, "link", elements[1].(map[string]any)["type"])
 		assert.Equal(t, "https://example.com", elements[1].(map[string]any)["url"])
+		// text should be absent (nil) for bare URLs to enable Slack unfurl
+		_, hasText := elements[1].(map[string]any)["text"]
+		assert.False(t, hasText, "bare URL should not have text field")
+	})
+
+	t.Run("markdown link [text](url)", func(t *testing.T) {
+		result, err := markdownToRichTextJSON("[SYS-7](https://linear.app/issue/SYS-7) を起票しています")
+		require.NoError(t, err)
+
+		elements := getFirstSectionElements(t, result)
+		require.Len(t, elements, 2)
+		assert.Equal(t, "link", elements[0].(map[string]any)["type"])
+		assert.Equal(t, "https://linear.app/issue/SYS-7", elements[0].(map[string]any)["url"])
+		assert.Equal(t, "SYS-7", elements[0].(map[string]any)["text"])
+		assert.Equal(t, " を起票しています", elements[1].(map[string]any)["text"])
 	})
 
 	t.Run("bullet list", func(t *testing.T) {
@@ -208,13 +223,42 @@ func TestParseInline(t *testing.T) {
 		assert.True(t, elements[2].Style.Code)
 	})
 
-	t.Run("url in middle", func(t *testing.T) {
+	t.Run("bare url omits text for unfurl", func(t *testing.T) {
 		elements := parseInline("visit https://example.com/path?q=1 today")
 		require.Len(t, elements, 3)
 		assert.Equal(t, "visit ", elements[0].Text)
 		assert.Equal(t, "link", elements[1].Type)
 		assert.Equal(t, "https://example.com/path?q=1", elements[1].URL)
+		assert.Empty(t, elements[1].Text, "bare URL should have empty text for Slack unfurl")
 		assert.Equal(t, " today", elements[2].Text)
+	})
+
+	t.Run("markdown link parsed", func(t *testing.T) {
+		elements := parseInline("[click here](https://example.com) for info")
+		require.Len(t, elements, 2)
+		assert.Equal(t, "link", elements[0].Type)
+		assert.Equal(t, "https://example.com", elements[0].URL)
+		assert.Equal(t, "click here", elements[0].Text)
+		assert.Equal(t, " for info", elements[1].Text)
+	})
+
+	t.Run("multiple markdown links in one line", func(t *testing.T) {
+		elements := parseInline("[a](https://a.com) and [b](https://b.com)")
+		require.Len(t, elements, 3)
+		assert.Equal(t, "link", elements[0].Type)
+		assert.Equal(t, "a", elements[0].Text)
+		assert.Equal(t, " and ", elements[1].Text)
+		assert.Equal(t, "link", elements[2].Type)
+		assert.Equal(t, "b", elements[2].Text)
+	})
+
+	t.Run("bold then markdown link", func(t *testing.T) {
+		elements := parseInline("**bold** [link](https://x.com)")
+		require.Len(t, elements, 3)
+		assert.True(t, elements[0].Style.Bold)
+		assert.Equal(t, " ", elements[1].Text)
+		assert.Equal(t, "link", elements[2].Type)
+		assert.Equal(t, "link", elements[2].Text)
 	})
 
 	t.Run("underscore in identifier not treated as italic", func(t *testing.T) {

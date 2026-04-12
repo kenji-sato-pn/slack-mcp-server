@@ -235,6 +235,7 @@ var (
 	bulletRe  = regexp.MustCompile(`^[\-\*•]\s+`)
 	orderedRe = regexp.MustCompile(`^\d+\.\s+`)
 	linkRe    = regexp.MustCompile(`https?://[^\s>)]+`)
+	mdLinkRe  = regexp.MustCompile(`\[([^\]]+)\]\((https?://[^)]+)\)`)
 )
 
 func isBulletLine(line string) bool {
@@ -283,6 +284,7 @@ func parseInline(text string) []richTextElement {
 		bestIdx := len(remaining)
 		bestType := ""
 		bestContent := ""
+		bestURL := ""
 		bestLen := 0
 
 		// Check for code span: `code`
@@ -336,7 +338,16 @@ func parseInline(text string) []richTextElement {
 			}
 		}
 
-		// Check for URL
+		// Check for markdown link: [text](url) — must check before bare URL
+		if loc := mdLinkRe.FindStringSubmatchIndex(remaining); loc != nil && loc[0] < bestIdx {
+			bestIdx = loc[0]
+			bestType = "mdLink"
+			bestContent = remaining[loc[2]:loc[3]] // capture group 1: text
+			bestURL = remaining[loc[4]:loc[5]]     // capture group 2: url
+			bestLen = loc[1] - loc[0]
+		}
+
+		// Check for bare URL
 		if loc := linkRe.FindStringIndex(remaining); loc != nil && loc[0] < bestIdx {
 			bestIdx = loc[0]
 			bestType = "link"
@@ -389,11 +400,16 @@ func parseInline(text string) []richTextElement {
 				Text:  bestContent,
 				Style: &richTextStyle{Strike: true},
 			})
+		case "mdLink":
+			elements = append(elements, richTextElement{
+				Type: "link",
+				URL:  bestURL,
+				Text: bestContent,
+			})
 		case "link":
 			elements = append(elements, richTextElement{
 				Type: "link",
 				URL:  bestContent,
-				Text: bestContent,
 			})
 		}
 

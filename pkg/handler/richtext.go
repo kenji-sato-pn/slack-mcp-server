@@ -78,7 +78,7 @@ func parseBlocks(text string) []any {
 	var currentSection []richTextElement
 	i := 0
 
-	// flushSection outputs the accumulated text section if non-empty
+	// flushSection outputs the accumulated text section if non-empty.
 	flushSection := func() {
 		if len(currentSection) > 0 {
 			elements = append(elements, richTextSection{
@@ -87,6 +87,15 @@ func parseBlocks(text string) []any {
 			})
 			currentSection = nil
 		}
+	}
+
+	// flushSectionBeforeBlock flushes with a trailing \n to ensure Slack's draft
+	// UI renders the section as a separate paragraph before block-level elements.
+	flushSectionBeforeBlock := func() {
+		if len(currentSection) > 0 {
+			currentSection = append(currentSection, richTextElement{Type: "text", Text: "\n"})
+		}
+		flushSection()
 	}
 
 	// appendLine adds a line's inline elements to the current section,
@@ -107,7 +116,7 @@ func parseBlocks(text string) []any {
 
 		// Code block: ```
 		if strings.HasPrefix(strings.TrimSpace(line), "```") {
-			flushSection()
+			flushSectionBeforeBlock()
 			var codeLines []string
 			i++ // skip opening ```
 			for i < len(lines) && !strings.HasPrefix(strings.TrimSpace(lines[i]), "```") {
@@ -130,7 +139,7 @@ func parseBlocks(text string) []any {
 
 		// Blockquote: > text
 		if strings.HasPrefix(line, "> ") || line == ">" {
-			flushSection()
+			flushSectionBeforeBlock()
 			var quoteElements []richTextElement
 			for i < len(lines) && (strings.HasPrefix(lines[i], "> ") || lines[i] == ">") {
 				qLine := strings.TrimPrefix(lines[i], "> ")
@@ -150,7 +159,7 @@ func parseBlocks(text string) []any {
 
 		// Bullet list: - item, * item, • item
 		if isBulletLine(line) {
-			flushSection()
+			flushSectionBeforeBlock()
 			var listItems []richTextSection
 			for i < len(lines) && isBulletLine(lines[i]) {
 				itemText := stripBulletPrefix(lines[i])
@@ -173,7 +182,7 @@ func parseBlocks(text string) []any {
 
 		// Ordered list: 1. item, 2. item
 		if isOrderedLine(line) {
-			flushSection()
+			flushSectionBeforeBlock()
 			var listItems []richTextSection
 			for i < len(lines) && isOrderedLine(lines[i]) {
 				itemText := stripOrderedPrefix(lines[i])

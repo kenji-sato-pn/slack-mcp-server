@@ -300,6 +300,7 @@ Steps 4 and 5 can run in parallel once Step 2 completes.
 |---|---|---|
 | Edge API `drafts.*` schema differs or doesn't exist | Drafts feature blocked | Step 1 early verification; fallback: ship schedule_* only |
 | `blocks` parameter not supported in drafts | Reduced formatting | Drafts content_type falls back to plain only |
+| `chat.scheduleMessage` not available with xoxc tokens | Scheduled message tools unusable with browser session tokens | Documented as xoxp/xoxb only; tools still register but return `not_allowed_token_type` at runtime |
 | Edge API rate limits / session expiry | Runtime errors | Reuse existing `limiter` package; error message prompts token refresh |
 | Skill update missed | Claude signature not applied | Step 6 explicit task; Step 7 verifies with live test |
 | Regression in `add_message` from Step 2 refactor | Existing feature broken | Run `go test ./pkg/handler/... -run AddMessage` after Step 2 |

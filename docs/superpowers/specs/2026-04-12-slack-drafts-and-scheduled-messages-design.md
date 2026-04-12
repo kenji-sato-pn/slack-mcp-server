@@ -8,7 +8,7 @@
 
 ## 1. Scope & Goals
 
-Add 8 MCP tools to slack-mcp-server for draft messages (Slack Edge API) and scheduled messages (official Slack API).
+Add 6 MCP tools to slack-mcp-server for draft messages (Slack Edge API) and scheduled messages (official Slack API). Originally planned 8, but `drafts_list` and `drafts_send` were removed after Edge API verification confirmed those endpoints don't exist.
 
 ### New Tools
 
@@ -318,12 +318,76 @@ Steps 4 and 5 can run in parallel once Step 2 completes.
 
 ## Edge API Verified Schema
 
-> **To be filled in Step 1.** Verify via browser devtools and document:
-> - `drafts.create` form fields and response shape
-> - `drafts.list` form fields and response shape
-> - `drafts.update` form fields and response shape
-> - `drafts.delete` form fields and response shape
-> - `drafts.send` form fields and response shape
-> - Whether `blocks` parameter is accepted
-> - Draft ID field name
-> - Timestamp representation
+**Verified on 2026-04-12 via browser devtools + direct API calls.**
+
+### Endpoints that EXIST
+
+#### `drafts.create`
+
+**Form fields:**
+- `token` (xoxc)
+- `blocks` (JSON Block Kit array) — **confirmed working**
+- `client_msg_id` (UUID, client-generated)
+- `destinations` (JSON array): `[{"channel_id":"Cxxxxxxxxxx"}]` or `[{"channel_id":"Cxxxxxxxxxx","thread_ts":"...","broadcast":false}]` for threads
+- `attachments` (empty string)
+- `file_ids` (JSON array, `[]`)
+- `is_from_composer` (boolean)
+- WebClient fields
+
+**Response:**
+```json
+{
+  "ok": true,
+  "draft": {
+    "id": "Dr0ASEPK1J2G",
+    "date_created": 1775966853,
+    "user_id": "U06RAF55PU7",
+    "team_id": "T0DQM7876",
+    "last_updated_ts": "1775966853.146997",
+    "blocks": [...],
+    "file_ids": [],
+    "is_from_composer": false,
+    "is_deleted": false,
+    "is_sent": false,
+    "client_msg_id": "02fe8d79-ad72-467e-b88e-8bca3de4c7f2",
+    "date_scheduled": 0,
+    "destinations": [{"channel_id": "D06SDRG4FTJ", "user_ids": ["U06RAF55PU7"]}]
+  },
+  "files": []
+}
+```
+
+**Key:** Draft ID format is `Dr` + alphanumeric (e.g., `Dr0ASEPK1J2G`).
+
+#### `drafts.update`
+
+**Form fields (same as create, PLUS):**
+- `draft_id` (required, e.g., `Dr0ASEPK1J2G`)
+- `client_last_updated_ts` (required, millisecond timestamp)
+- Plus all fields from create (`blocks`, `client_msg_id`, `destinations`, etc.)
+
+**Response:** Same shape as `drafts.create` (returns updated draft object).
+
+#### `drafts.delete`
+
+**Form fields:**
+- `token` (xoxc)
+- `draft_id` (required)
+- `client_last_updated_ts` (required)
+- `skip_file_deletion` (boolean)
+- WebClient fields
+
+**Response:** `{"ok": true}`
+
+### Endpoints that DO NOT EXIST
+
+- **`drafts.list`** — Drafts are managed client-side (localStorage). No server API.
+- **`drafts.send`** — Sending a draft uses regular `chat.postMessage` followed by `drafts.delete`.
+
+### Design Impact
+
+1. **`drafts_list` tool: REMOVED** — Cannot implement without server API.
+2. **`drafts_send` tool: REMOVED** — No dedicated endpoint. Users can use `conversations_add_message` + `drafts_delete` separately.
+3. **`blocks` parameter: CONFIRMED** — `buildTextBlocks` output can be JSON-serialized directly.
+4. **`destinations` pattern**: Channel is inside a JSON array, not a top-level field. Thread drafts include `thread_ts` and `broadcast` in the destination object.
+5. **`drafts.update` requires**: `draft_id` + `client_last_updated_ts` + full content (blocks/destinations). The `client_last_updated_ts` comes from the create/update response's `last_updated_ts` field (converted to milliseconds).

@@ -210,6 +210,38 @@ func (ch *ConversationsHandler) UsersResource(ctx context.Context, request mcp.R
 	}, nil
 }
 
+// buildTextBlocks converts text with the given content type into Block Kit blocks
+// and a plain-text fallback. For "text/markdown", it parses markdown into blocks
+// (falling back to plain text on parse error with a warning). For "text/plain",
+// it returns nil blocks and the raw text.
+func buildTextBlocks(logger *zap.Logger, text, contentType string) ([]slack.Block, string, error) {
+	switch contentType {
+	case "text/plain":
+		return nil, text, nil
+	case "text/markdown":
+		blocks, err := slackGoUtil.ConvertMarkdownTextToBlocks(text)
+		if err != nil {
+			logger.Warn("Markdown parsing error, falling back to plain text", zap.Error(err))
+			return nil, text, nil
+		}
+		return blocks, text, nil
+	default:
+		return nil, "", errors.New("content_type must be either 'text/plain' or 'text/markdown'")
+	}
+}
+
+// buildMsgOptionsFromBlocks converts the output of buildTextBlocks into
+// slack.MsgOption slice ready for PostMessageContext / ScheduleMessageContext.
+func buildMsgOptionsFromBlocks(blocks []slack.Block, plainText string) []slack.MsgOption {
+	if blocks != nil {
+		return []slack.MsgOption{slack.MsgOptionBlocks(blocks...)}
+	}
+	return []slack.MsgOption{
+		slack.MsgOptionDisableMarkdown(),
+		slack.MsgOptionText(plainText, false),
+	}
+}
+
 // ConversationsAddMessageHandler posts a message and returns it as CSV
 func (ch *ConversationsHandler) ConversationsAddMessageHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	ch.logger.Debug("ConversationsAddMessageHandler called", zap.Any("params", request.Params))
@@ -231,22 +263,11 @@ func (ch *ConversationsHandler) ConversationsAddMessageHandler(ctx context.Conte
 		options = append(options, slack.MsgOptionTS(params.threadTs))
 	}
 
-	switch params.contentType {
-	case "text/plain":
-		options = append(options, slack.MsgOptionDisableMarkdown())
-		options = append(options, slack.MsgOptionText(params.text, false))
-	case "text/markdown":
-		blocks, err := slackGoUtil.ConvertMarkdownTextToBlocks(params.text)
-		if err != nil {
-			ch.logger.Warn("Markdown parsing error", zap.Error(err))
-			options = append(options, slack.MsgOptionDisableMarkdown())
-			options = append(options, slack.MsgOptionText(params.text, false))
-		} else {
-			options = append(options, slack.MsgOptionBlocks(blocks...))
-		}
-	default:
-		return nil, errors.New("content_type must be either 'text/plain' or 'text/markdown'")
+	blocks, plainText, err := buildTextBlocks(ch.logger, params.text, params.contentType)
+	if err != nil {
+		return nil, err
 	}
+	options = append(options, buildMsgOptionsFromBlocks(blocks, plainText)...)
 
 	unfurlOpt := os.Getenv("SLACK_MCP_ADD_MESSAGE_UNFURLING")
 	if text.IsUnfurlingEnabled(params.text, unfurlOpt, ch.logger) {

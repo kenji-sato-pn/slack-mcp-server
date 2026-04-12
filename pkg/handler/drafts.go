@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gocarina/gocsv"
 	"github.com/google/uuid"
@@ -106,14 +107,32 @@ func (h *DraftsHandler) DraftsCreateHandler(ctx context.Context, request mcp.Cal
 		return nil, fmt.Errorf("failed to marshal destinations: %w", err)
 	}
 
+	// Parse optional schedule_at for scheduled drafts
+	var dateScheduled int64
+	scheduleAt := request.GetString("schedule_at", "")
+	if scheduleAt != "" {
+		t, err := time.Parse(time.RFC3339, scheduleAt)
+		if err != nil {
+			return nil, fmt.Errorf("invalid schedule_at: must be ISO-8601 with timezone (RFC3339), got %q: %w", scheduleAt, err)
+		}
+		if t.Before(time.Now()) {
+			return nil, errors.New("schedule_at must be in the future")
+		}
+		if t.After(time.Now().AddDate(0, 0, maxScheduleDays)) {
+			return nil, fmt.Errorf("schedule_at must be within %d days from now", maxScheduleDays)
+		}
+		dateScheduled = t.Unix()
+	}
+
 	clientMsgID := uuid.New().String()
 
 	h.logger.Debug("Creating draft",
 		zap.String("channel", channel),
 		zap.String("thread_ts", threadTs),
+		zap.Int64("date_scheduled", dateScheduled),
 	)
 
-	draft, err := h.apiProvider.Slack().DraftsCreate(ctx, string(blocksJSON), clientMsgID, string(destJSON))
+	draft, err := h.apiProvider.Slack().DraftsCreate(ctx, string(blocksJSON), clientMsgID, string(destJSON), dateScheduled)
 	if err != nil {
 		h.logger.Error("DraftsCreate failed", zap.Error(err))
 		return nil, fmt.Errorf("drafts.create failed: %w", err)
@@ -197,11 +216,28 @@ func (h *DraftsHandler) DraftsUpdateHandler(ctx context.Context, request mcp.Cal
 
 	clientMsgID := uuid.New().String()
 
+	// Parse optional schedule_at for scheduled drafts
+	var dateScheduled int64
+	scheduleAt := request.GetString("schedule_at", "")
+	if scheduleAt != "" {
+		t, err := time.Parse(time.RFC3339, scheduleAt)
+		if err != nil {
+			return nil, fmt.Errorf("invalid schedule_at: must be ISO-8601 with timezone (RFC3339), got %q: %w", scheduleAt, err)
+		}
+		if t.Before(time.Now()) {
+			return nil, errors.New("schedule_at must be in the future")
+		}
+		if t.After(time.Now().AddDate(0, 0, maxScheduleDays)) {
+			return nil, fmt.Errorf("schedule_at must be within %d days from now", maxScheduleDays)
+		}
+		dateScheduled = t.Unix()
+	}
+
 	// Convert last_updated_ts "1775966853.146997" to milliseconds "1775966853146"
 	// The API expects milliseconds as client_last_updated_ts
 	lastUpdatedMs := convertTsToMillis(clientLastUpdatedTs)
 
-	draft, err := h.apiProvider.Slack().DraftsUpdate(ctx, draftID, lastUpdatedMs, string(blocksJSON), clientMsgID, string(destJSON))
+	draft, err := h.apiProvider.Slack().DraftsUpdate(ctx, draftID, lastUpdatedMs, string(blocksJSON), clientMsgID, string(destJSON), dateScheduled)
 	if err != nil {
 		h.logger.Error("DraftsUpdate failed", zap.Error(err))
 		return nil, fmt.Errorf("drafts.update failed: %w", err)

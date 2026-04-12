@@ -215,8 +215,8 @@ type SlackAPI interface {
 	GetMutedChannels(ctx context.Context) (map[string]bool, error)
 
 	// Drafts Edge API methods (xoxc/xoxd only)
-	DraftsCreate(ctx context.Context, blocks, clientMsgID, destinations string) (*edge.Draft, error)
-	DraftsUpdate(ctx context.Context, draftID, clientLastUpdatedTs, blocks, clientMsgID, destinations string) (*edge.Draft, error)
+	DraftsCreate(ctx context.Context, blocks, clientMsgID, destinations string, dateScheduled int64) (*edge.Draft, error)
+	DraftsUpdate(ctx context.Context, draftID, clientLastUpdatedTs, blocks, clientMsgID, destinations string, dateScheduled int64) (*edge.Draft, error)
 	DraftsDelete(ctx context.Context, draftID, clientLastUpdatedTs string) error
 
 	// User groups API methods
@@ -524,12 +524,12 @@ func (c *MCPSlackClient) GetMutedChannels(ctx context.Context) (map[string]bool,
 	return c.edgeClient.GetMutedChannels(ctx)
 }
 
-func (c *MCPSlackClient) DraftsCreate(ctx context.Context, blocks, clientMsgID, destinations string) (*edge.Draft, error) {
-	return c.edgeClient.DraftsCreate(ctx, blocks, clientMsgID, destinations)
+func (c *MCPSlackClient) DraftsCreate(ctx context.Context, blocks, clientMsgID, destinations string, dateScheduled int64) (*edge.Draft, error) {
+	return c.edgeClient.DraftsCreate(ctx, blocks, clientMsgID, destinations, dateScheduled)
 }
 
-func (c *MCPSlackClient) DraftsUpdate(ctx context.Context, draftID, clientLastUpdatedTs, blocks, clientMsgID, destinations string) (*edge.Draft, error) {
-	return c.edgeClient.DraftsUpdate(ctx, draftID, clientLastUpdatedTs, blocks, clientMsgID, destinations)
+func (c *MCPSlackClient) DraftsUpdate(ctx context.Context, draftID, clientLastUpdatedTs, blocks, clientMsgID, destinations string, dateScheduled int64) (*edge.Draft, error) {
+	return c.edgeClient.DraftsUpdate(ctx, draftID, clientLastUpdatedTs, blocks, clientMsgID, destinations, dateScheduled)
 }
 
 func (c *MCPSlackClient) DraftsDelete(ctx context.Context, draftID, clientLastUpdatedTs string) error {

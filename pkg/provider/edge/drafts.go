@@ -40,6 +40,7 @@ type draftsCreateForm struct {
 	Attachments    string `json:"attachments,omitempty"`
 	FileIDs        string `json:"file_ids"`
 	IsFromComposer bool   `json:"is_from_composer"`
+	DateScheduled  int64  `json:"date_scheduled,omitempty"`
 	WebClientFields
 }
 
@@ -50,9 +51,17 @@ type draftsResponse struct {
 
 // DraftsCreate creates a new draft message.
 // blocks and destinations must be pre-serialized JSON strings.
-func (cl *Client) DraftsCreate(ctx context.Context, blocks, clientMsgID, destinations string) (*Draft, error) {
+// dateScheduled is a Unix timestamp for scheduling; 0 means no schedule.
+func (cl *Client) DraftsCreate(ctx context.Context, blocks, clientMsgID, destinations string, dateScheduled int64) (*Draft, error) {
 	ctx, task := trace.NewTask(ctx, "DraftsCreate")
 	defer task.End()
+
+	reason := "MessageInput:updateDraft"
+	isFromComposer := false
+	if dateScheduled > 0 {
+		reason = "schedule-draft"
+		isFromComposer = true
+	}
 
 	form := draftsCreateForm{
 		BaseRequest:     BaseRequest{Token: cl.token},
@@ -61,8 +70,9 @@ func (cl *Client) DraftsCreate(ctx context.Context, blocks, clientMsgID, destina
 		Destinations:    destinations,
 		Attachments:     "",
 		FileIDs:         "[]",
-		IsFromComposer:  false,
-		WebClientFields: webclientReason("MessageInput:updateDraft"),
+		IsFromComposer:  isFromComposer,
+		DateScheduled:   dateScheduled,
+		WebClientFields: webclientReason(reason),
 	}
 
 	resp, err := cl.PostForm(ctx, "drafts.create", values(form, true))
@@ -89,14 +99,23 @@ type draftsUpdateForm struct {
 	Attachments         string `json:"attachments,omitempty"`
 	FileIDs             string `json:"file_ids"`
 	IsFromComposer      bool   `json:"is_from_composer"`
+	DateScheduled       int64  `json:"date_scheduled,omitempty"`
 	WebClientFields
 }
 
 // DraftsUpdate updates an existing draft message.
 // blocks and destinations must be pre-serialized JSON strings.
-func (cl *Client) DraftsUpdate(ctx context.Context, draftID, clientLastUpdatedTs, blocks, clientMsgID, destinations string) (*Draft, error) {
+// dateScheduled is a Unix timestamp for scheduling; 0 means no schedule.
+func (cl *Client) DraftsUpdate(ctx context.Context, draftID, clientLastUpdatedTs, blocks, clientMsgID, destinations string, dateScheduled int64) (*Draft, error) {
 	ctx, task := trace.NewTask(ctx, "DraftsUpdate")
 	defer task.End()
+
+	reason := "MessageInput:updateDraft"
+	isFromComposer := false
+	if dateScheduled > 0 {
+		reason = "schedule-draft"
+		isFromComposer = true
+	}
 
 	form := draftsUpdateForm{
 		BaseRequest:         BaseRequest{Token: cl.token},
@@ -107,8 +126,9 @@ func (cl *Client) DraftsUpdate(ctx context.Context, draftID, clientLastUpdatedTs
 		Destinations:        destinations,
 		Attachments:         "",
 		FileIDs:             "[]",
-		IsFromComposer:      false,
-		WebClientFields:     webclientReason("MessageInput:updateDraft"),
+		IsFromComposer:      isFromComposer,
+		DateScheduled:       dateScheduled,
+		WebClientFields:     webclientReason(reason),
 	}
 
 	resp, err := cl.PostForm(ctx, "drafts.update", values(form, true))

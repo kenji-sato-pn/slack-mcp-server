@@ -475,6 +475,9 @@ func NewMCPServer(provider *provider.ApiProvider, logger *zap.Logger, enabledToo
 				mcp.DefaultString("text/markdown"),
 				mcp.Description("Content type. Default is 'text/markdown'. Allowed: 'text/markdown', 'text/plain'."),
 			),
+			mcp.WithString("schedule_at",
+				mcp.Description("Optional. ISO-8601 timestamp with timezone to schedule the draft for future sending. Example: '2026-04-13T09:00:00+09:00'. Must be in the future and within 120 days. If omitted, creates a regular (unsent) draft."),
+			),
 		), draftsHandler.DraftsCreateHandler)
 	}
 
@@ -505,6 +508,9 @@ func NewMCPServer(provider *provider.ApiProvider, logger *zap.Logger, enabledToo
 			mcp.WithString("content_type",
 				mcp.DefaultString("text/markdown"),
 				mcp.Description("Content type. Default is 'text/markdown'. Allowed: 'text/markdown', 'text/plain'."),
+			),
+			mcp.WithString("schedule_at",
+				mcp.Description("Optional. ISO-8601 timestamp with timezone to schedule the draft for future sending. Example: '2026-04-13T09:00:00+09:00'. Must be in the future and within 120 days. Set to schedule an existing draft, or omit to keep it as a regular draft."),
 			),
 		), draftsHandler.DraftsUpdateHandler)
 	}

@@ -33,9 +33,9 @@ func TestConvertTsToMillis(t *testing.T) {
 	}
 }
 
-func TestBuildBlocksJSONForEdge(t *testing.T) {
-	t.Run("plain text wraps in rich_text block", func(t *testing.T) {
-		result, err := buildBlocksJSONForEdge(nil, "hello world")
+func TestBuildRichTextBlockJSON(t *testing.T) {
+	t.Run("single line wraps in rich_text block", func(t *testing.T) {
+		result, err := buildRichTextBlockJSON("hello world")
 		require.NoError(t, err)
 
 		var blocks []map[string]any
@@ -56,19 +56,24 @@ func TestBuildBlocksJSONForEdge(t *testing.T) {
 		assert.Equal(t, "hello world", textEl["text"])
 	})
 
-	t.Run("with blocks passes through", func(t *testing.T) {
-		logger := zap.NewNop()
-		blocks, _, err := buildTextBlocks(logger, "**bold**", "text/markdown")
-		require.NoError(t, err)
-		require.NotNil(t, blocks)
-
-		result, err := buildBlocksJSONForEdge(blocks, "**bold**")
+	t.Run("multiline text creates section per line", func(t *testing.T) {
+		result, err := buildRichTextBlockJSON("line1\nline2\nline3")
 		require.NoError(t, err)
 
-		var parsed []any
-		err = json.Unmarshal(result, &parsed)
+		var blocks []map[string]any
+		err = json.Unmarshal(result, &blocks)
 		require.NoError(t, err)
-		assert.NotEmpty(t, parsed)
+		require.Len(t, blocks, 1)
+
+		elements := blocks[0]["elements"].([]any)
+		require.Len(t, elements, 3)
+
+		for i, expected := range []string{"line1", "line2", "line3"} {
+			section := elements[i].(map[string]any)
+			textElements := section["elements"].([]any)
+			textEl := textElements[0].(map[string]any)
+			assert.Equal(t, expected, textEl["text"])
+		}
 	})
 }
 

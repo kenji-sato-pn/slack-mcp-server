@@ -181,27 +181,16 @@ func parseBlocks(text string) []any {
 			continue
 		}
 
-		// Regular paragraph: collect consecutive non-special lines
-		var paraLines []string
-		for i < len(lines) {
-			l := lines[i]
-			_, isHeading := parseHeading(l)
-			if strings.TrimSpace(l) == "" || strings.HasPrefix(strings.TrimSpace(l), "```") ||
-				strings.HasPrefix(l, "> ") || l == ">" ||
-				isBulletLine(l) || isOrderedLine(l) || isHeading {
-				break
-			}
-			paraLines = append(paraLines, l)
-			i++
-		}
-		paraText := strings.Join(paraLines, "\n")
-		inlineElements := parseInline(paraText)
+		// Regular text line: each line becomes its own rich_text_section
+		// (Slack's draft UI does not render \n within text elements as line breaks)
+		inlineElements := parseInline(line)
 		if len(inlineElements) > 0 {
 			elements = append(elements, richTextSection{
 				Type:     "rich_text_section",
 				Elements: inlineElements,
 			})
 		}
+		i++
 	}
 
 	// If nothing was parsed, add a single section with the raw text

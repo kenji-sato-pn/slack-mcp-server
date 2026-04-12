@@ -146,6 +146,33 @@ func TestMarkdownToRichTextJSON(t *testing.T) {
 		assert.Equal(t, "bullet", list["style"])
 	})
 
+	t.Run("multiline paragraph creates separate sections", func(t *testing.T) {
+		input := "**進捗**:\n• 1つ目の項目\n• 2つ目の項目\n\n**次のセクション**: ここは別段落。\n\n最後の段落。"
+		result, err := markdownToRichTextJSON(input)
+		require.NoError(t, err)
+
+		blocks := parseRichTextBlocks(t, result)
+		require.Len(t, blocks, 1)
+		// Should have: section (進捗:), list (2 items), section (次のセクション...), section (最後の段落。)
+		require.Equal(t, 4, len(blocks[0].Elements))
+
+		// First element: paragraph with bold
+		section0 := blocks[0].Elements[0].(map[string]any)
+		assert.Equal(t, "rich_text_section", section0["type"])
+
+		// Second: bullet list
+		list := blocks[0].Elements[1].(map[string]any)
+		assert.Equal(t, "rich_text_list", list["type"])
+
+		// Third: another paragraph
+		section2 := blocks[0].Elements[2].(map[string]any)
+		assert.Equal(t, "rich_text_section", section2["type"])
+
+		// Fourth: final paragraph
+		section3 := blocks[0].Elements[3].(map[string]any)
+		assert.Equal(t, "rich_text_section", section3["type"])
+	})
+
 	t.Run("heading converted to bold", func(t *testing.T) {
 		result, err := markdownToRichTextJSON("## My Heading")
 		require.NoError(t, err)

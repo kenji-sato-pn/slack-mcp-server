@@ -138,6 +138,11 @@ type markParams struct {
 	channel string
 	ts      string
 }
+
+const (
+	maxScheduleDays = 120
+)
+
 type ConversationsHandler struct {
 	apiProvider *provider.ApiProvider
 	logger      *zap.Logger
@@ -210,6 +215,38 @@ func (ch *ConversationsHandler) UsersResource(ctx context.Context, request mcp.R
 	}, nil
 }
 
+// buildTextBlocks converts text with the given content type into Block Kit blocks
+// and a plain-text fallback. For "text/markdown", it parses markdown into blocks
+// (falling back to plain text on parse error with a warning). For "text/plain",
+// it returns nil blocks and the raw text.
+func buildTextBlocks(logger *zap.Logger, text, contentType string) ([]slack.Block, string, error) {
+	switch contentType {
+	case "text/plain":
+		return nil, text, nil
+	case "text/markdown":
+		blocks, err := slackGoUtil.ConvertMarkdownTextToBlocks(text)
+		if err != nil {
+			logger.Warn("Markdown parsing error, falling back to plain text", zap.Error(err))
+			return nil, text, nil
+		}
+		return blocks, text, nil
+	default:
+		return nil, "", errors.New("content_type must be either 'text/plain' or 'text/markdown'")
+	}
+}
+
+// buildMsgOptionsFromBlocks converts the output of buildTextBlocks into
+// slack.MsgOption slice ready for PostMessageContext / ScheduleMessageContext.
+func buildMsgOptionsFromBlocks(blocks []slack.Block, plainText string) []slack.MsgOption {
+	if blocks != nil {
+		return []slack.MsgOption{slack.MsgOptionBlocks(blocks...)}
+	}
+	return []slack.MsgOption{
+		slack.MsgOptionDisableMarkdown(),
+		slack.MsgOptionText(plainText, false),
+	}
+}
+
 // ConversationsAddMessageHandler posts a message and returns it as CSV
 func (ch *ConversationsHandler) ConversationsAddMessageHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	ch.logger.Debug("ConversationsAddMessageHandler called", zap.Any("params", request.Params))
@@ -231,22 +268,11 @@ func (ch *ConversationsHandler) ConversationsAddMessageHandler(ctx context.Conte
 		options = append(options, slack.MsgOptionTS(params.threadTs))
 	}
 
-	switch params.contentType {
-	case "text/plain":
-		options = append(options, slack.MsgOptionDisableMarkdown())
-		options = append(options, slack.MsgOptionText(params.text, false))
-	case "text/markdown":
-		blocks, err := slackGoUtil.ConvertMarkdownTextToBlocks(params.text)
-		if err != nil {
-			ch.logger.Warn("Markdown parsing error", zap.Error(err))
-			options = append(options, slack.MsgOptionDisableMarkdown())
-			options = append(options, slack.MsgOptionText(params.text, false))
-		} else {
-			options = append(options, slack.MsgOptionBlocks(blocks...))
-		}
-	default:
-		return nil, errors.New("content_type must be either 'text/plain' or 'text/markdown'")
+	blocks, plainText, err := buildTextBlocks(ch.logger, params.text, params.contentType)
+	if err != nil {
+		return nil, err
 	}
+	options = append(options, buildMsgOptionsFromBlocks(blocks, plainText)...)
 
 	unfurlOpt := os.Getenv("SLACK_MCP_ADD_MESSAGE_UNFURLING")
 	if text.IsUnfurlingEnabled(params.text, unfurlOpt, ch.logger) {
@@ -1481,48 +1507,49 @@ func isChannelAllowed(channel string) bool {
 }
 
 func (ch *ConversationsHandler) resolveChannelID(ctx context.Context, channel string) (string, error) {
+	return resolveChannelIDWithProvider(ctx, ch.apiProvider, ch.logger, channel)
+}
+
+// resolveChannelIDWithProvider resolves channel names (#general, @user) to IDs using the given provider.
+func resolveChannelIDWithProvider(ctx context.Context, apiProvider *provider.ApiProvider, logger *zap.Logger, channel string) (string, error) {
 	if !strings.HasPrefix(channel, "#") && !strings.HasPrefix(channel, "@") {
 		return channel, nil
 	}
 
-	// First attempt: try to resolve from current cache
-	channelsMaps := ch.apiProvider.ProvideChannelsMaps()
+	channelsMaps := apiProvider.ProvideChannelsMaps()
 	chn, ok := channelsMaps.ChannelsInv[channel]
 	if ok {
 		return channelsMaps.Channels[chn].ID, nil
 	}
 
-	// Channel not found - try refreshing cache and retry once
-	ch.logger.Debug("Channel not found in cache, attempting refresh",
+	logger.Debug("Channel not found in cache, attempting refresh",
 		zap.String("channel", channel))
 
-	refreshErr := ch.apiProvider.ForceRefreshChannels(ctx)
+	refreshErr := apiProvider.ForceRefreshChannels(ctx)
 	wasRateLimited := errors.Is(refreshErr, provider.ErrRefreshRateLimited)
 
 	if refreshErr != nil && !wasRateLimited {
-		ch.logger.Error("Failed to refresh channels cache",
+		logger.Error("Failed to refresh channels cache",
 			zap.String("channel", channel),
 			zap.Error(refreshErr))
 		return "", fmt.Errorf("channel %q not found and cache refresh failed: %w", channel, refreshErr)
 	}
 
-	// If rate-limited, cache wasn't refreshed - no point in a second lookup
 	if wasRateLimited {
-		ch.logger.Warn("Channel not found; cache refresh was rate-limited",
+		logger.Warn("Channel not found; cache refresh was rate-limited",
 			zap.String("channel", channel))
 		return "", fmt.Errorf("channel %q not found (cache refresh was rate-limited, try again later)", channel)
 	}
 
-	// Second attempt after successful refresh
-	channelsMaps = ch.apiProvider.ProvideChannelsMaps()
+	channelsMaps = apiProvider.ProvideChannelsMaps()
 	chn, ok = channelsMaps.ChannelsInv[channel]
 	if !ok {
-		ch.logger.Error("Channel not found even after cache refresh",
+		logger.Error("Channel not found even after cache refresh",
 			zap.String("channel", channel))
 		return "", fmt.Errorf("channel %q not found", channel)
 	}
 
-	ch.logger.Debug("Channel found after cache refresh",
+	logger.Debug("Channel found after cache refresh",
 		zap.String("channel", channel),
 		zap.String("channel_id", channelsMaps.Channels[chn].ID))
 
@@ -2105,6 +2132,15 @@ func marshalMessagesToCSV(messages []Message) (*mcp.CallToolResult, error) {
 		return nil, err
 	}
 	return mcp.NewToolResultText(string(csvBytes)), nil
+}
+
+// truncateText truncates a string to maxLen characters, appending "..." if truncated.
+func truncateText(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "..."
 }
 
 func getUserInfo(userID string, usersMap map[string]slack.User) (userName, realName string, ok bool) {

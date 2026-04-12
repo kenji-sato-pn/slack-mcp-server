@@ -214,12 +214,18 @@ type SlackAPI interface {
 	ClientCounts(ctx context.Context) (edge.ClientCountsResponse, error)
 	GetMutedChannels(ctx context.Context) (map[string]bool, error)
 
+	// Drafts Edge API methods (xoxc/xoxd only)
+	DraftsCreate(ctx context.Context, blocks, clientMsgID, destinations string, dateScheduled int64) (*edge.Draft, error)
+	DraftsUpdate(ctx context.Context, draftID, clientLastUpdatedTs, blocks, clientMsgID, destinations string, dateScheduled int64) (*edge.Draft, error)
+	DraftsDelete(ctx context.Context, draftID, clientLastUpdatedTs string) error
+
 	// User groups API methods
 	GetUserGroupsContext(ctx context.Context, options ...slack.GetUserGroupsOption) ([]slack.UserGroup, error)
 	GetUserGroupMembersContext(ctx context.Context, userGroup string, options ...slack.GetUserGroupMembersOption) ([]string, error)
 	CreateUserGroupContext(ctx context.Context, userGroup slack.UserGroup, options ...slack.CreateUserGroupOption) (slack.UserGroup, error)
 	UpdateUserGroupContext(ctx context.Context, userGroupID string, options ...slack.UpdateUserGroupsOption) (slack.UserGroup, error)
 	UpdateUserGroupMembersContext(ctx context.Context, userGroup string, members string, options ...slack.UpdateUserGroupMembersOption) (slack.UserGroup, error)
+
 }
 
 type MCPSlackClient struct {
@@ -512,6 +518,18 @@ func (c *MCPSlackClient) ClientCounts(ctx context.Context) (edge.ClientCountsRes
 
 func (c *MCPSlackClient) GetMutedChannels(ctx context.Context) (map[string]bool, error) {
 	return c.edgeClient.GetMutedChannels(ctx)
+}
+
+func (c *MCPSlackClient) DraftsCreate(ctx context.Context, blocks, clientMsgID, destinations string, dateScheduled int64) (*edge.Draft, error) {
+	return c.edgeClient.DraftsCreate(ctx, blocks, clientMsgID, destinations, dateScheduled)
+}
+
+func (c *MCPSlackClient) DraftsUpdate(ctx context.Context, draftID, clientLastUpdatedTs, blocks, clientMsgID, destinations string, dateScheduled int64) (*edge.Draft, error) {
+	return c.edgeClient.DraftsUpdate(ctx, draftID, clientLastUpdatedTs, blocks, clientMsgID, destinations, dateScheduled)
+}
+
+func (c *MCPSlackClient) DraftsDelete(ctx context.Context, draftID, clientLastUpdatedTs string) error {
+	return c.edgeClient.DraftsDelete(ctx, draftID, clientLastUpdatedTs)
 }
 
 func (c *MCPSlackClient) GetUserGroupsContext(ctx context.Context, options ...slack.GetUserGroupsOption) ([]slack.UserGroup, error) {

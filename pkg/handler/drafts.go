@@ -274,22 +274,12 @@ func (h *DraftsHandler) resolveChannelID(ctx context.Context, channel string) (s
 	return resolveChannelIDWithProvider(ctx, h.apiProvider, h.logger, channel)
 }
 
-// buildRichTextBlockJSON constructs a rich_text block from plain text for the Edge API.
+// buildRichTextBlockJSON converts markdown-formatted text to Slack rich_text block JSON.
 // The Edge API drafts endpoints ONLY accept rich_text blocks (not header, section, etc.).
-// The entire text is placed in a single rich_text_section element — Slack handles
-// newlines within the text content natively.
+// Supports: **bold**, _italic_, `code`, ~~strike~~, bullet/ordered lists, blockquotes,
+// code blocks, and URLs.
 func buildRichTextBlockJSON(text string) ([]byte, error) {
-	block := []map[string]any{{
-		"type": "rich_text",
-		"elements": []map[string]any{{
-			"type": "rich_text_section",
-			"elements": []map[string]any{{
-				"type": "text",
-				"text": text,
-			}},
-		}},
-	}}
-	return json.Marshal(block)
+	return markdownToRichTextJSON(text)
 }
 
 // buildDestinationsJSON creates the JSON destinations array for the Edge API.

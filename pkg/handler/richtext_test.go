@@ -261,6 +261,28 @@ func TestParseInline(t *testing.T) {
 		assert.Equal(t, "link", elements[2].Text)
 	})
 
+	t.Run("bold link **[text](url)**", func(t *testing.T) {
+		elements := parseInline("see **[SYS-12](https://linear.app/issue/SYS-12)** here")
+		require.Len(t, elements, 3)
+		assert.Equal(t, "see ", elements[0].Text)
+		assert.Equal(t, "link", elements[1].Type)
+		assert.Equal(t, "https://linear.app/issue/SYS-12", elements[1].URL)
+		assert.Equal(t, "SYS-12", elements[1].Text)
+		assert.True(t, elements[1].Style.Bold)
+		assert.Equal(t, " here", elements[2].Text)
+	})
+
+	t.Run("italic link _[text](url)_", func(t *testing.T) {
+		elements := parseInline("see _[docs](https://docs.example.com)_ here")
+		require.Len(t, elements, 3)
+		assert.Equal(t, "see ", elements[0].Text)
+		assert.Equal(t, "link", elements[1].Type)
+		assert.Equal(t, "https://docs.example.com", elements[1].URL)
+		assert.Equal(t, "docs", elements[1].Text)
+		assert.True(t, elements[1].Style.Italic)
+		assert.Equal(t, " here", elements[2].Text)
+	})
+
 	t.Run("underscore in identifier not treated as italic", func(t *testing.T) {
 		elements := parseInline("use channel_id field")
 		require.Len(t, elements, 1)

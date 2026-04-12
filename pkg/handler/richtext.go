@@ -377,17 +377,37 @@ func parseInline(text string) []richTextElement {
 		// Add the formatted element
 		switch bestType {
 		case "bold":
-			elements = append(elements, richTextElement{
-				Type:  "text",
-				Text:  bestContent,
-				Style: &richTextStyle{Bold: true},
-			})
+			// Check if bold content is a markdown link: **[text](url)**
+			if m := mdLinkRe.FindStringSubmatch(bestContent); m != nil && m[0] == bestContent {
+				elements = append(elements, richTextElement{
+					Type:  "link",
+					URL:   m[2],
+					Text:  m[1],
+					Style: &richTextStyle{Bold: true},
+				})
+			} else {
+				elements = append(elements, richTextElement{
+					Type:  "text",
+					Text:  bestContent,
+					Style: &richTextStyle{Bold: true},
+				})
+			}
 		case "italic":
-			elements = append(elements, richTextElement{
-				Type:  "text",
-				Text:  bestContent,
-				Style: &richTextStyle{Italic: true},
-			})
+			// Check if italic content is a markdown link: _[text](url)_
+			if m := mdLinkRe.FindStringSubmatch(bestContent); m != nil && m[0] == bestContent {
+				elements = append(elements, richTextElement{
+					Type:  "link",
+					URL:   m[2],
+					Text:  m[1],
+					Style: &richTextStyle{Italic: true},
+				})
+			} else {
+				elements = append(elements, richTextElement{
+					Type:  "text",
+					Text:  bestContent,
+					Style: &richTextStyle{Italic: true},
+				})
+			}
 		case "code":
 			elements = append(elements, richTextElement{
 				Type:  "text",

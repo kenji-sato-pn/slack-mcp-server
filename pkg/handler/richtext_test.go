@@ -151,6 +151,51 @@ func TestMarkdownToRichTextJSON(t *testing.T) {
 		require.GreaterOrEqual(t, len(blocks[0].Elements), 3)
 	})
 
+	t.Run("section before list gets trailing newline", func(t *testing.T) {
+		input := "intro text\n- item1\n- item2"
+		result, err := markdownToRichTextJSON(input)
+		require.NoError(t, err)
+
+		blocks := parseRichTextBlocks(t, result)
+		require.Len(t, blocks, 1)
+		require.Len(t, blocks[0].Elements, 2) // section + list
+
+		section := blocks[0].Elements[0].(map[string]any)
+		elems := section["elements"].([]any)
+		last := elems[len(elems)-1].(map[string]any)
+		assert.Equal(t, "\n", last["text"], "section before block should end with trailing newline")
+	})
+
+	t.Run("section before quote gets trailing newline", func(t *testing.T) {
+		input := "intro text\n> quoted"
+		result, err := markdownToRichTextJSON(input)
+		require.NoError(t, err)
+
+		blocks := parseRichTextBlocks(t, result)
+		require.Len(t, blocks, 1)
+		require.Len(t, blocks[0].Elements, 2) // section + quote
+
+		section := blocks[0].Elements[0].(map[string]any)
+		elems := section["elements"].([]any)
+		last := elems[len(elems)-1].(map[string]any)
+		assert.Equal(t, "\n", last["text"], "section before block should end with trailing newline")
+	})
+
+	t.Run("section before code block gets trailing newline", func(t *testing.T) {
+		input := "intro text\n```\ncode\n```"
+		result, err := markdownToRichTextJSON(input)
+		require.NoError(t, err)
+
+		blocks := parseRichTextBlocks(t, result)
+		require.Len(t, blocks, 1)
+		require.Len(t, blocks[0].Elements, 2) // section + preformatted
+
+		section := blocks[0].Elements[0].(map[string]any)
+		elems := section["elements"].([]any)
+		last := elems[len(elems)-1].(map[string]any)
+		assert.Equal(t, "\n", last["text"], "section before block should end with trailing newline")
+	})
+
 	t.Run("bullet with asterisk prefix", func(t *testing.T) {
 		result, err := markdownToRichTextJSON("* item1\n* item2")
 		require.NoError(t, err)

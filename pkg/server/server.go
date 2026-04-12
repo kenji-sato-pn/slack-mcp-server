@@ -45,6 +45,9 @@ const (
 	ToolConversationsScheduledMessagesList   = "conversations_scheduled_messages_list"
 	ToolConversationsCancelScheduledMessage  = "conversations_cancel_scheduled_message"
 	ToolUsersSearch                          = "users_search"
+	ToolDraftsCreate                         = "drafts_create"
+	ToolDraftsUpdate                         = "drafts_update"
+	ToolDraftsDelete                         = "drafts_delete"
 )
 
 var ValidToolNames = []string{
@@ -68,6 +71,9 @@ var ValidToolNames = []string{
 	ToolConversationsScheduledMessagesList,
 	ToolConversationsCancelScheduledMessage,
 	ToolUsersSearch,
+	ToolDraftsCreate,
+	ToolDraftsUpdate,
+	ToolDraftsDelete,
 }
 
 func ValidateEnabledTools(tools []string) error {
@@ -445,6 +451,78 @@ func NewMCPServer(provider *provider.ApiProvider, logger *zap.Logger, enabledToo
 				mcp.Description("The ID of the scheduled message to cancel. Get IDs from conversations_scheduled_messages_list."),
 			),
 		), conversationsHandler.ConversationsCancelScheduledMessageHandler)
+	}
+
+	draftsHandler := handler.NewDraftsHandler(provider, logger)
+
+	if !provider.IsBotToken() && shouldAddTool(ToolDraftsCreate, enabledTools, "SLACK_MCP_ADD_MESSAGE_TOOL") {
+		s.AddTool(mcp.NewTool(ToolDraftsCreate,
+			mcp.WithDescription("Create a draft message in Slack. The draft appears in the user's Drafts sidebar and can be edited or sent later from the Slack UI. Requires browser session tokens (xoxc/xoxd)."),
+			mcp.WithTitleAnnotation("Create Draft"),
+			mcp.WithDestructiveHintAnnotation(true),
+			mcp.WithString("channel_id",
+				mcp.Required(),
+				mcp.Description("ID of the channel in format Cxxxxxxxxxx or its name starting with #... or @... aka #general or @username_dm."),
+			),
+			mcp.WithString("thread_ts",
+				mcp.Description("Unique identifier of a thread's parent message. If provided, the draft is for a thread reply."),
+			),
+			mcp.WithString("text",
+				mcp.Required(),
+				mcp.Description("Draft message text in specified content_type format."),
+			),
+			mcp.WithString("content_type",
+				mcp.DefaultString("text/markdown"),
+				mcp.Description("Content type. Default is 'text/markdown'. Allowed: 'text/markdown', 'text/plain'."),
+			),
+		), draftsHandler.DraftsCreateHandler)
+	}
+
+	if !provider.IsBotToken() && shouldAddTool(ToolDraftsUpdate, enabledTools, "SLACK_MCP_ADD_MESSAGE_TOOL") {
+		s.AddTool(mcp.NewTool(ToolDraftsUpdate,
+			mcp.WithDescription("Update an existing draft message's content. Requires draft_id and client_last_updated_ts from the drafts_create response. Requires browser session tokens (xoxc/xoxd)."),
+			mcp.WithTitleAnnotation("Update Draft"),
+			mcp.WithDestructiveHintAnnotation(true),
+			mcp.WithString("draft_id",
+				mcp.Required(),
+				mcp.Description("ID of the draft to update (Dr-prefixed, e.g. 'Dr0ASEPK1J2G'). Get from drafts_create response."),
+			),
+			mcp.WithString("client_last_updated_ts",
+				mcp.Required(),
+				mcp.Description("The last_updated_ts value from the draft's create or previous update response. Used for optimistic concurrency."),
+			),
+			mcp.WithString("channel_id",
+				mcp.Required(),
+				mcp.Description("ID of the channel in format Cxxxxxxxxxx or its name starting with #... or @..."),
+			),
+			mcp.WithString("thread_ts",
+				mcp.Description("Unique identifier of a thread's parent message. If provided, the draft is for a thread reply."),
+			),
+			mcp.WithString("text",
+				mcp.Required(),
+				mcp.Description("New draft message text in specified content_type format."),
+			),
+			mcp.WithString("content_type",
+				mcp.DefaultString("text/markdown"),
+				mcp.Description("Content type. Default is 'text/markdown'. Allowed: 'text/markdown', 'text/plain'."),
+			),
+		), draftsHandler.DraftsUpdateHandler)
+	}
+
+	if !provider.IsBotToken() && shouldAddTool(ToolDraftsDelete, enabledTools, "SLACK_MCP_ADD_MESSAGE_TOOL") {
+		s.AddTool(mcp.NewTool(ToolDraftsDelete,
+			mcp.WithDescription("Delete a draft message. Requires draft_id and client_last_updated_ts from the drafts_create response. Requires browser session tokens (xoxc/xoxd)."),
+			mcp.WithTitleAnnotation("Delete Draft"),
+			mcp.WithDestructiveHintAnnotation(true),
+			mcp.WithString("draft_id",
+				mcp.Required(),
+				mcp.Description("ID of the draft to delete (Dr-prefixed, e.g. 'Dr0ASEPK1J2G')."),
+			),
+			mcp.WithString("client_last_updated_ts",
+				mcp.Required(),
+				mcp.Description("The last_updated_ts value from the draft's create or previous update response."),
+			),
+		), draftsHandler.DraftsDeleteHandler)
 	}
 
 	channelsHandler := handler.NewChannelsHandler(provider, logger)

@@ -114,6 +114,9 @@ func TestValidToolNames(t *testing.T) {
 			ToolConversationsScheduledMessagesList:   true,
 			ToolConversationsCancelScheduledMessage:  true,
 			ToolUsersSearch:                          true,
+			ToolDraftsCreate:                         true,
+			ToolDraftsUpdate:                         true,
+			ToolDraftsDelete:                         true,
 		}
 
 		assert.Equal(t, len(expectedTools), len(ValidToolNames), "ValidToolNames should have %d tools", len(expectedTools))
@@ -144,6 +147,9 @@ func TestValidToolNames(t *testing.T) {
 		assert.Equal(t, "conversations_scheduled_messages_list", ToolConversationsScheduledMessagesList)
 		assert.Equal(t, "conversations_cancel_scheduled_message", ToolConversationsCancelScheduledMessage)
 		assert.Equal(t, "users_search", ToolUsersSearch)
+		assert.Equal(t, "drafts_create", ToolDraftsCreate)
+		assert.Equal(t, "drafts_update", ToolDraftsUpdate)
+		assert.Equal(t, "drafts_delete", ToolDraftsDelete)
 	})
 }
 

@@ -278,17 +278,25 @@ func (ch *ConversationsHandler) ConversationsAddMessageHandler(ctx context.Conte
 		options = append(options, buildMsgOptionsFromBlocks(blocks, plainText)...)
 	}
 
+	attachmentCount := 0
 	if params.attachmentsJSON != "" {
 		var attachments []slack.Attachment
 		if err := json.Unmarshal([]byte(params.attachmentsJSON), &attachments); err != nil {
 			ch.logger.Error("Failed to parse attachments_json", zap.Error(err))
 			return nil, fmt.Errorf("attachments_json must be a valid JSON array of Slack attachments: %w", err)
 		}
+		if len(attachments) == 0 {
+			return nil, errors.New("attachments_json must contain at least one attachment when provided")
+		}
+		attachmentCount = len(attachments)
 		options = append(options, slack.MsgOptionAttachments(attachments...))
 	}
 
+	// Unfurl evaluation only applies to URLs in `text`. URLs inside attachment fields
+	// (e.g. title_link, image_url) are not subject to this control. When text is empty
+	// (attachments-only message), explicitly disable unfurl.
 	unfurlOpt := os.Getenv("SLACK_MCP_ADD_MESSAGE_UNFURLING")
-	if text.IsUnfurlingEnabled(params.text, unfurlOpt, ch.logger) {
+	if params.text != "" && text.IsUnfurlingEnabled(params.text, unfurlOpt, ch.logger) {
 		options = append(options, slack.MsgOptionEnableLinkUnfurl())
 	} else {
 		options = append(options, slack.MsgOptionDisableLinkUnfurl())
@@ -299,6 +307,7 @@ func (ch *ConversationsHandler) ConversationsAddMessageHandler(ctx context.Conte
 		zap.String("channel", params.channel),
 		zap.String("thread_ts", params.threadTs),
 		zap.String("content_type", params.contentType),
+		zap.Int("attachment_count", attachmentCount),
 	)
 	respChannel, respTimestamp, err := ch.apiProvider.Slack().PostMessageContext(ctx, params.channel, options...)
 	if err != nil {

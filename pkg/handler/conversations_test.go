@@ -708,6 +708,12 @@ func TestUnitParseAttachmentsJSON(t *testing.T) {
 			wantErrIs: "at least one attachment",
 		},
 		{
+			name:      "null JSON treated as empty array",
+			input:     `null`,
+			wantErr:   true,
+			wantErrIs: "at least one attachment",
+		},
+		{
 			name:      "invalid JSON rejected",
 			input:     `not json`,
 			wantErr:   true,

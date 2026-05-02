@@ -297,7 +297,7 @@ func (ch *ConversationsHandler) ConversationsAddMessageHandler(ctx context.Conte
 	if params.attachmentsJSON != "" {
 		attachments, err := parseAttachmentsJSON(params.attachmentsJSON)
 		if err != nil {
-			ch.logger.Error("Failed to parse attachments_json", zap.Error(err))
+			ch.logger.Error("Invalid attachments_json parameter", zap.Error(err))
 			return nil, err
 		}
 		attachmentCount = len(attachments)

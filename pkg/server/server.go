@@ -185,11 +185,14 @@ func NewMCPServer(provider *provider.ApiProvider, logger *zap.Logger, enabledToo
 				mcp.Description("Unique identifier of either a thread's parent message or a message in the thread_ts must be the timestamp in format 1234567890.123456 of an existing message with 0 or more replies. Optional, if not provided the message will be added to the channel itself, otherwise it will be added to the thread."),
 			),
 			mcp.WithString("text",
-				mcp.Description("Message text in specified content_type format. Example: 'Hello, world!' for text/plain or '# Hello, world!' for text/markdown."),
+				mcp.Description("Message text in specified content_type format. Optional if attachments_json is provided. Example: 'Hello, world!' for text/plain or '# Hello, world!' for text/markdown."),
 			),
 			mcp.WithString("content_type",
 				mcp.DefaultString("text/markdown"),
 				mcp.Description("Content type of the message. Default is 'text/markdown'. Allowed values: 'text/markdown', 'text/plain'."),
+			),
+			mcp.WithString("attachments_json",
+				mcp.Description("JSON array of Slack legacy attachments for structured notifications (colored sidebar, title, fields, footer). Example: [{\"color\":\"danger\",\"title\":\"Alert\",\"text\":\"Something happened\",\"fields\":[{\"title\":\"Namespace\",\"value\":\"AWS/Lambda\",\"short\":true}],\"footer\":\"Posted by Claude\"}]. Can be used alone (without text) or combined with text."),
 			),
 		), conversationsHandler.ConversationsAddMessageHandler)
 	}

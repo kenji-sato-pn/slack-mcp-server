@@ -17,6 +17,7 @@ import (
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/param"
 	"github.com/openai/openai-go/responses"
+	"github.com/slack-go/slack"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -649,6 +650,134 @@ func TestUnitIsSlackUserIDPrefix(t *testing.T) {
 			got := isSlackUserIDPrefix(tt.s)
 			if got != tt.want {
 				t.Errorf("isSlackUserIDPrefix(%q) = %v, want %v", tt.s, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUnitParseAttachmentsJSON(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantErr   bool
+		wantErrIs string // substring expected in err.Error() when wantErr
+		wantLen   int
+		check     func(t *testing.T, got []slack.Attachment)
+	}{
+		{
+			name:    "single attachment with all fields",
+			input:   `[{"color":"danger","title":"Alert","title_link":"https://example.com","text":"body","fields":[{"title":"k","value":"v","short":true}],"footer":"f"}]`,
+			wantLen: 1,
+			check: func(t *testing.T, got []slack.Attachment) {
+				a := got[0]
+				assert.Equal(t, "danger", a.Color)
+				assert.Equal(t, "Alert", a.Title)
+				assert.Equal(t, "https://example.com", a.TitleLink)
+				assert.Equal(t, "body", a.Text)
+				assert.Equal(t, "f", a.Footer)
+				require.Len(t, a.Fields, 1)
+				assert.Equal(t, "k", a.Fields[0].Title)
+				assert.Equal(t, "v", a.Fields[0].Value)
+				assert.True(t, a.Fields[0].Short)
+			},
+		},
+		{
+			name:    "multiple attachments",
+			input:   `[{"color":"good","text":"a"},{"color":"warning","text":"b"}]`,
+			wantLen: 2,
+		},
+		{
+			name:    "minimal attachment (text only)",
+			input:   `[{"text":"hello"}]`,
+			wantLen: 1,
+		},
+		{
+			name:    "with actions array",
+			input:   `[{"text":"x","actions":[{"type":"button","text":"Open","url":"https://example.com","style":"danger"}]}]`,
+			wantLen: 1,
+			check: func(t *testing.T, got []slack.Attachment) {
+				require.Len(t, got[0].Actions, 1)
+				assert.EqualValues(t, "button", got[0].Actions[0].Type)
+				assert.Equal(t, "Open", got[0].Actions[0].Text)
+			},
+		},
+		{
+			name:    "multiple actions with mixed styles",
+			input:   `[{"text":"alert","actions":[{"type":"button","text":"Approve","style":"primary","url":"https://example.com/approve"},{"type":"button","text":"Reject","style":"danger","url":"https://example.com/reject"},{"type":"button","text":"Defer","url":"https://example.com/defer"}]}]`,
+			wantLen: 1,
+			check: func(t *testing.T, got []slack.Attachment) {
+				require.Len(t, got[0].Actions, 3)
+				assert.Equal(t, "Approve", got[0].Actions[0].Text)
+				assert.Equal(t, "primary", got[0].Actions[0].Style)
+				assert.Equal(t, "Reject", got[0].Actions[1].Text)
+				assert.Equal(t, "danger", got[0].Actions[1].Style)
+				assert.Equal(t, "Defer", got[0].Actions[2].Text)
+				assert.Equal(t, "", got[0].Actions[2].Style) // unset → default (gray)
+			},
+		},
+		{
+			name:    "color as hex value",
+			input:   `[{"color":"#FF0000","title":"hex color test","text":"body"}]`,
+			wantLen: 1,
+			check: func(t *testing.T, got []slack.Attachment) {
+				assert.Equal(t, "#FF0000", got[0].Color)
+			},
+		},
+		{
+			name:    "fields with short:false (full-width)",
+			input:   `[{"text":"x","fields":[{"title":"Long","value":"v","short":false}]}]`,
+			wantLen: 1,
+			check: func(t *testing.T, got []slack.Attachment) {
+				require.Len(t, got[0].Fields, 1)
+				assert.False(t, got[0].Fields[0].Short)
+			},
+		},
+		{
+			name:      "empty array rejected",
+			input:     `[]`,
+			wantErr:   true,
+			wantErrIs: "at least one attachment",
+		},
+		{
+			name:      "null JSON treated as empty array",
+			input:     `null`,
+			wantErr:   true,
+			wantErrIs: "at least one attachment",
+		},
+		{
+			name:      "invalid JSON rejected",
+			input:     `not json`,
+			wantErr:   true,
+			wantErrIs: "must be a valid JSON array",
+		},
+		{
+			name:      "object instead of array rejected",
+			input:     `{"color":"danger"}`,
+			wantErr:   true,
+			wantErrIs: "must be a valid JSON array",
+		},
+		{
+			name:      "type mismatch rejected",
+			input:     `[{"color": 123}]`,
+			wantErr:   true,
+			wantErrIs: "must be a valid JSON array",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseAttachmentsJSON(tt.input)
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.wantErrIs != "" {
+					assert.Contains(t, err.Error(), tt.wantErrIs)
+				}
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, got, tt.wantLen)
+			if tt.check != nil {
+				tt.check(t, got)
 			}
 		})
 	}

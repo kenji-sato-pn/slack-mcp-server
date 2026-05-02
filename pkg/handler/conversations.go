@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -93,10 +94,11 @@ type searchParams struct {
 }
 
 type addMessageParams struct {
-	channel     string
-	threadTs    string
-	text        string
-	contentType string
+	channel         string
+	threadTs        string
+	text            string
+	contentType     string
+	attachmentsJSON string
 }
 
 type addReactionParams struct {
@@ -235,6 +237,21 @@ func buildTextBlocks(logger *zap.Logger, text, contentType string) ([]slack.Bloc
 	}
 }
 
+// parseAttachmentsJSON decodes a JSON array of Slack legacy attachments and
+// validates that it contains at least one element. Returns a structured error
+// suitable for surfacing back to the MCP caller (LLM) so it can correct the
+// payload on retry.
+func parseAttachmentsJSON(jsonStr string) ([]slack.Attachment, error) {
+	var attachments []slack.Attachment
+	if err := json.Unmarshal([]byte(jsonStr), &attachments); err != nil {
+		return nil, fmt.Errorf("attachments_json must be a valid JSON array of Slack attachments: %w", err)
+	}
+	if len(attachments) == 0 {
+		return nil, errors.New("attachments_json must contain at least one attachment when provided")
+	}
+	return attachments, nil
+}
+
 // buildMsgOptionsFromBlocks converts the output of buildTextBlocks into
 // slack.MsgOption slice ready for PostMessageContext / ScheduleMessageContext.
 func buildMsgOptionsFromBlocks(blocks []slack.Block, plainText string) []slack.MsgOption {
@@ -268,14 +285,30 @@ func (ch *ConversationsHandler) ConversationsAddMessageHandler(ctx context.Conte
 		options = append(options, slack.MsgOptionTS(params.threadTs))
 	}
 
-	blocks, plainText, err := buildTextBlocks(ch.logger, params.text, params.contentType)
-	if err != nil {
-		return nil, err
+	if params.text != "" {
+		blocks, plainText, err := buildTextBlocks(ch.logger, params.text, params.contentType)
+		if err != nil {
+			return nil, err
+		}
+		options = append(options, buildMsgOptionsFromBlocks(blocks, plainText)...)
 	}
-	options = append(options, buildMsgOptionsFromBlocks(blocks, plainText)...)
 
+	attachmentCount := 0
+	if params.attachmentsJSON != "" {
+		attachments, err := parseAttachmentsJSON(params.attachmentsJSON)
+		if err != nil {
+			ch.logger.Error("Invalid attachments_json parameter", zap.Error(err))
+			return nil, err
+		}
+		attachmentCount = len(attachments)
+		options = append(options, slack.MsgOptionAttachments(attachments...))
+	}
+
+	// Unfurl evaluation only applies to URLs in `text`. URLs inside attachment fields
+	// (e.g. title_link, image_url) are not subject to this control. When text is empty
+	// (attachments-only message), explicitly disable unfurl.
 	unfurlOpt := os.Getenv("SLACK_MCP_ADD_MESSAGE_UNFURLING")
-	if text.IsUnfurlingEnabled(params.text, unfurlOpt, ch.logger) {
+	if params.text != "" && text.IsUnfurlingEnabled(params.text, unfurlOpt, ch.logger) {
 		options = append(options, slack.MsgOptionEnableLinkUnfurl())
 	} else {
 		options = append(options, slack.MsgOptionDisableLinkUnfurl())
@@ -286,6 +319,7 @@ func (ch *ConversationsHandler) ConversationsAddMessageHandler(ctx context.Conte
 		zap.String("channel", params.channel),
 		zap.String("thread_ts", params.threadTs),
 		zap.String("content_type", params.contentType),
+		zap.Int("attachment_count", attachmentCount),
 	)
 	respChannel, respTimestamp, err := ch.apiProvider.Slack().PostMessageContext(ctx, params.channel, options...)
 	if err != nil {
@@ -1791,9 +1825,10 @@ func (ch *ConversationsHandler) parseParamsToolAddMessage(ctx context.Context, r
 		// Backward compatibility with "payload" parameter
 		msgText = request.GetString("payload", "")
 	}
-	if msgText == "" {
+	attachmentsJSON := request.GetString("attachments_json", "")
+	if msgText == "" && attachmentsJSON == "" {
 		ch.logger.Error("Message text missing")
-		return nil, errors.New("text must be a string")
+		return nil, errors.New("text must be a string (or provide attachments_json)")
 	}
 
 	contentType := request.GetString("content_type", "text/markdown")
@@ -1803,10 +1838,11 @@ func (ch *ConversationsHandler) parseParamsToolAddMessage(ctx context.Context, r
 	}
 
 	return &addMessageParams{
-		channel:     channel,
-		threadTs:    threadTs,
-		text:        msgText,
-		contentType: contentType,
+		channel:         channel,
+		threadTs:        threadTs,
+		text:            msgText,
+		contentType:     contentType,
+		attachmentsJSON: attachmentsJSON,
 	}, nil
 }
 

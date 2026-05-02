@@ -702,6 +702,37 @@ func TestUnitParseAttachmentsJSON(t *testing.T) {
 			},
 		},
 		{
+			name:    "multiple actions with mixed styles",
+			input:   `[{"text":"alert","actions":[{"type":"button","text":"Approve","style":"primary","url":"https://example.com/approve"},{"type":"button","text":"Reject","style":"danger","url":"https://example.com/reject"},{"type":"button","text":"Defer","url":"https://example.com/defer"}]}]`,
+			wantLen: 1,
+			check: func(t *testing.T, got []slack.Attachment) {
+				require.Len(t, got[0].Actions, 3)
+				assert.Equal(t, "Approve", got[0].Actions[0].Text)
+				assert.Equal(t, "primary", got[0].Actions[0].Style)
+				assert.Equal(t, "Reject", got[0].Actions[1].Text)
+				assert.Equal(t, "danger", got[0].Actions[1].Style)
+				assert.Equal(t, "Defer", got[0].Actions[2].Text)
+				assert.Equal(t, "", got[0].Actions[2].Style) // unset → default (gray)
+			},
+		},
+		{
+			name:    "color as hex value",
+			input:   `[{"color":"#FF0000","title":"hex color test","text":"body"}]`,
+			wantLen: 1,
+			check: func(t *testing.T, got []slack.Attachment) {
+				assert.Equal(t, "#FF0000", got[0].Color)
+			},
+		},
+		{
+			name:    "fields with short:false (full-width)",
+			input:   `[{"text":"x","fields":[{"title":"Long","value":"v","short":false}]}]`,
+			wantLen: 1,
+			check: func(t *testing.T, got []slack.Attachment) {
+				require.Len(t, got[0].Fields, 1)
+				assert.False(t, got[0].Fields[0].Short)
+			},
+		},
+		{
 			name:      "empty array rejected",
 			input:     `[]`,
 			wantErr:   true,

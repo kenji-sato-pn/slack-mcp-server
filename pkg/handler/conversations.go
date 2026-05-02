@@ -237,6 +237,21 @@ func buildTextBlocks(logger *zap.Logger, text, contentType string) ([]slack.Bloc
 	}
 }
 
+// parseAttachmentsJSON decodes a JSON array of Slack legacy attachments and
+// validates that it contains at least one element. Returns a structured error
+// suitable for surfacing back to the MCP caller (LLM) so it can correct the
+// payload on retry.
+func parseAttachmentsJSON(jsonStr string) ([]slack.Attachment, error) {
+	var attachments []slack.Attachment
+	if err := json.Unmarshal([]byte(jsonStr), &attachments); err != nil {
+		return nil, fmt.Errorf("attachments_json must be a valid JSON array of Slack attachments: %w", err)
+	}
+	if len(attachments) == 0 {
+		return nil, errors.New("attachments_json must contain at least one attachment when provided")
+	}
+	return attachments, nil
+}
+
 // buildMsgOptionsFromBlocks converts the output of buildTextBlocks into
 // slack.MsgOption slice ready for PostMessageContext / ScheduleMessageContext.
 func buildMsgOptionsFromBlocks(blocks []slack.Block, plainText string) []slack.MsgOption {
@@ -280,13 +295,10 @@ func (ch *ConversationsHandler) ConversationsAddMessageHandler(ctx context.Conte
 
 	attachmentCount := 0
 	if params.attachmentsJSON != "" {
-		var attachments []slack.Attachment
-		if err := json.Unmarshal([]byte(params.attachmentsJSON), &attachments); err != nil {
+		attachments, err := parseAttachmentsJSON(params.attachmentsJSON)
+		if err != nil {
 			ch.logger.Error("Failed to parse attachments_json", zap.Error(err))
-			return nil, fmt.Errorf("attachments_json must be a valid JSON array of Slack attachments: %w", err)
-		}
-		if len(attachments) == 0 {
-			return nil, errors.New("attachments_json must contain at least one attachment when provided")
+			return nil, err
 		}
 		attachmentCount = len(attachments)
 		options = append(options, slack.MsgOptionAttachments(attachments...))

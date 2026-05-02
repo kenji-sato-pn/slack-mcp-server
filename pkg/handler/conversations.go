@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -93,10 +94,11 @@ type searchParams struct {
 }
 
 type addMessageParams struct {
-	channel     string
-	threadTs    string
-	text        string
-	contentType string
+	channel         string
+	threadTs        string
+	text            string
+	contentType     string
+	attachmentsJSON string
 }
 
 type addReactionParams struct {
@@ -268,11 +270,22 @@ func (ch *ConversationsHandler) ConversationsAddMessageHandler(ctx context.Conte
 		options = append(options, slack.MsgOptionTS(params.threadTs))
 	}
 
-	blocks, plainText, err := buildTextBlocks(ch.logger, params.text, params.contentType)
-	if err != nil {
-		return nil, err
+	if params.text != "" {
+		blocks, plainText, err := buildTextBlocks(ch.logger, params.text, params.contentType)
+		if err != nil {
+			return nil, err
+		}
+		options = append(options, buildMsgOptionsFromBlocks(blocks, plainText)...)
 	}
-	options = append(options, buildMsgOptionsFromBlocks(blocks, plainText)...)
+
+	if params.attachmentsJSON != "" {
+		var attachments []slack.Attachment
+		if err := json.Unmarshal([]byte(params.attachmentsJSON), &attachments); err != nil {
+			ch.logger.Error("Failed to parse attachments_json", zap.Error(err))
+			return nil, fmt.Errorf("attachments_json must be a valid JSON array of Slack attachments: %w", err)
+		}
+		options = append(options, slack.MsgOptionAttachments(attachments...))
+	}
 
 	unfurlOpt := os.Getenv("SLACK_MCP_ADD_MESSAGE_UNFURLING")
 	if text.IsUnfurlingEnabled(params.text, unfurlOpt, ch.logger) {
@@ -1791,9 +1804,10 @@ func (ch *ConversationsHandler) parseParamsToolAddMessage(ctx context.Context, r
 		// Backward compatibility with "payload" parameter
 		msgText = request.GetString("payload", "")
 	}
-	if msgText == "" {
+	attachmentsJSON := request.GetString("attachments_json", "")
+	if msgText == "" && attachmentsJSON == "" {
 		ch.logger.Error("Message text missing")
-		return nil, errors.New("text must be a string")
+		return nil, errors.New("text must be a string (or provide attachments_json)")
 	}
 
 	contentType := request.GetString("content_type", "text/markdown")
@@ -1803,10 +1817,11 @@ func (ch *ConversationsHandler) parseParamsToolAddMessage(ctx context.Context, r
 	}
 
 	return &addMessageParams{
-		channel:     channel,
-		threadTs:    threadTs,
-		text:        msgText,
-		contentType: contentType,
+		channel:         channel,
+		threadTs:        threadTs,
+		text:            msgText,
+		contentType:     contentType,
+		attachmentsJSON: attachmentsJSON,
 	}, nil
 }
 

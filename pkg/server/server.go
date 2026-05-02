@@ -191,6 +191,9 @@ func NewMCPServer(provider *provider.ApiProvider, logger *zap.Logger, enabledToo
 				mcp.DefaultString("text/markdown"),
 				mcp.Description("Content type of the message. Default is 'text/markdown'. Allowed values: 'text/markdown', 'text/plain'."),
 			),
+			mcp.WithString("attachments_json",
+				mcp.Description("JSON array of Slack legacy attachments for structured notifications (colored sidebar, title, fields, footer). Example: [{\"color\":\"danger\",\"title\":\"Alert\",\"text\":\"Something happened\",\"fields\":[{\"title\":\"Namespace\",\"value\":\"AWS/Lambda\",\"short\":true}],\"footer\":\"Posted by Claude\"}]. Can be used alone (without text) or combined with text."),
+			),
 		), conversationsHandler.ConversationsAddMessageHandler)
 	}
 

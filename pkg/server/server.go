@@ -194,6 +194,10 @@ func NewMCPServer(provider *provider.ApiProvider, logger *zap.Logger, enabledToo
 			mcp.WithString("attachments_json",
 				mcp.Description("JSON array of Slack legacy attachments for structured notifications (colored sidebar, title, fields, footer). Example: [{\"color\":\"danger\",\"title\":\"Alert\",\"text\":\"Something happened\",\"fields\":[{\"title\":\"Namespace\",\"value\":\"AWS/Lambda\",\"short\":true}],\"footer\":\"Posted by Claude\"}]. Can be used alone (without text) or combined with text."),
 			),
+			mcp.WithBoolean("reply_broadcast",
+				mcp.Description("If true, the reply is also shown in the parent channel, not just the thread (Slack's 'also send to #channel' option). Only meaningful when thread_ts is provided. Default is false."),
+				mcp.DefaultBool(false),
+			),
 		), conversationsHandler.ConversationsAddMessageHandler)
 	}
 

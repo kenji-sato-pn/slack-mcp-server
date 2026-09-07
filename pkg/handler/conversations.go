@@ -99,6 +99,7 @@ type addMessageParams struct {
 	text            string
 	contentType     string
 	attachmentsJSON string
+	replyBroadcast  bool
 }
 
 type addReactionParams struct {
@@ -284,6 +285,9 @@ func (ch *ConversationsHandler) ConversationsAddMessageHandler(ctx context.Conte
 	if params.threadTs != "" {
 		options = append(options, slack.MsgOptionTS(params.threadTs))
 	}
+	if params.replyBroadcast {
+		options = append(options, slack.MsgOptionBroadcast())
+	}
 
 	if params.text != "" {
 		blocks, plainText, err := buildTextBlocks(ch.logger, params.text, params.contentType)
@@ -320,6 +324,7 @@ func (ch *ConversationsHandler) ConversationsAddMessageHandler(ctx context.Conte
 		zap.String("thread_ts", params.threadTs),
 		zap.String("content_type", params.contentType),
 		zap.Int("attachment_count", attachmentCount),
+		zap.Bool("reply_broadcast", params.replyBroadcast),
 	)
 	respChannel, respTimestamp, err := ch.apiProvider.Slack().PostMessageContext(ctx, params.channel, options...)
 	if err != nil {
@@ -1837,12 +1842,15 @@ func (ch *ConversationsHandler) parseParamsToolAddMessage(ctx context.Context, r
 		return nil, errors.New("content_type must be either 'text/plain' or 'text/markdown'")
 	}
 
+	replyBroadcast := request.GetBool("reply_broadcast", false)
+
 	return &addMessageParams{
 		channel:         channel,
 		threadTs:        threadTs,
 		text:            msgText,
 		contentType:     contentType,
 		attachmentsJSON: attachmentsJSON,
+		replyBroadcast:  replyBroadcast,
 	}, nil
 }
 

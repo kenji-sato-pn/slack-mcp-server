@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/korotovsky/slack-mcp-server/pkg/test/util"
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/packages/param"
@@ -20,6 +21,7 @@ import (
 	"github.com/slack-go/slack"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestIntegrationConversations(t *testing.T) {
@@ -779,6 +781,57 @@ func TestUnitParseAttachmentsJSON(t *testing.T) {
 			if tt.check != nil {
 				tt.check(t, got)
 			}
+		})
+	}
+}
+
+func TestUnitParseParamsToolAddMessage_ReplyBroadcast(t *testing.T) {
+	tests := []struct {
+		name           string
+		arguments      map[string]any
+		wantReplyBcast bool
+	}{
+		{
+			name: "reply_broadcast omitted defaults to false",
+			arguments: map[string]any{
+				"channel_id": "C123456",
+				"text":       "hello",
+			},
+			wantReplyBcast: false,
+		},
+		{
+			name: "reply_broadcast explicitly false",
+			arguments: map[string]any{
+				"channel_id":      "C123456",
+				"text":            "hello",
+				"reply_broadcast": false,
+			},
+			wantReplyBcast: false,
+		},
+		{
+			name: "reply_broadcast true is parsed through",
+			arguments: map[string]any{
+				"channel_id":      "C123456",
+				"thread_ts":       "1234567890.123456",
+				"text":            "hello",
+				"reply_broadcast": true,
+			},
+			wantReplyBcast: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("SLACK_MCP_ADD_MESSAGE_TOOL", "true")
+
+			ch := NewConversationsHandler(nil, zap.NewNop())
+
+			req := mcp.CallToolRequest{}
+			req.Params.Arguments = tt.arguments
+
+			got, err := ch.parseParamsToolAddMessage(context.Background(), req)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantReplyBcast, got.replyBroadcast)
 		})
 	}
 }
